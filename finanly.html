@@ -601,6 +601,158 @@ const loadState = () => {
 };
 
 /* ─────────────────────────────────────────────────────────────
+   PERSISTÊNCIA NO SUPABASE
+   ───────────────────────────────────────────────────────────── */
+async function saveToSupabase(userId, state) {
+  if (!userId) return { ok: false, error: "sem usuário" };
+  try {
+    // 1) Perfil
+    await supabase.from("profiles").upsert({
+      user_id: userId,
+      name: state.nome || null,
+      city: state.cidade || null,
+      income_source: state.fonteRenda || null,
+      income_cents: state.rendaMediaCents || 0,
+      expenses_fixed_cents: state.gastosFixosCents || 0,
+      savings_cents: state.reservaCents || 0,
+    }, { onConflict: "user_id" });
+
+    // 2) Dívidas — apaga as antigas e insere as atuais
+    await supabase.from("debts").delete().eq("user_id", userId);
+    if ((state.dividas || []).length > 0) {
+      await supabase.from("debts").insert(
+        state.dividas.map((d) => ({
+          user_id: userId,
+          name: d.name || "Dívida",
+          total_cents: d.totalCents || 0,
+          installment_cents: d.parcelaCents || 0,
+        }))
+      );
+    }
+
+    // 3) Metas — apaga as antigas e insere as atuais
+    await supabase.from("goals").delete().eq("user_id", userId);
+    if ((state.metas || []).length > 0) {
+      await supabase.from("goals").insert(
+        state.metas.map((m) => ({
+          user_id: userId,
+          title: m.title || "Meta",
+          target_cents: m.valueCents || 0,
+          months: m.months || 12,
+          priority: m.priority || "média",
+        }))
+      );
+    }
+
+    // 4) Lançamentos — apaga os antigos e insere os atuais
+    await supabase.from("incomes").delete().eq("user_id", userId);
+    await supabase.from("expenses").delete().eq("user_id", userId);
+
+    const receitas = (state.lancamentos || []).filter(l => l.tipo === "receita");
+    const despesas = (state.lancamentos || []).filter(l => l.tipo === "despesa");
+
+    if (receitas.length > 0) {
+      await supabase.from("incomes").insert(
+        receitas.map((r) => ({
+          user_id: userId,
+          description: r.descricao || "Receita",
+          amount_cents: r.valueCents || 0,
+          received_at: new Date(r.date || Date.now()).toISOString().split("T")[0],
+        }))
+      );
+    }
+    if (despesas.length > 0) {
+      await supabase.from("expenses").insert(
+        despesas.map((d) => ({
+          user_id: userId,
+          description: d.descricao || "Despesa",
+          amount_cents: d.valueCents || 0,
+          paid_at: new Date(d.date || Date.now()).toISOString().split("T")[0],
+          is_fixed: !!d.isFixed,
+        }))
+      );
+    }
+
+    return { ok: true };
+  } catch (e) {
+    console.error("Erro ao salvar no Supabase:", e);
+    return { ok: false, error: e.message };
+  }
+}
+
+async function loadFromSupabase(userId) {
+  if (!userId) return null;
+  try {
+    const [profileRes, debtsRes, goalsRes, incomesRes, expensesRes] = await Promise.all([
+      supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
+      supabase.from("debts").select("*").eq("user_id", userId),
+      supabase.from("goals").select("*").eq("user_id", userId),
+      supabase.from("incomes").select("*").eq("user_id", userId),
+      supabase.from("expenses").select("*").eq("user_id", userId),
+    ]);
+
+    const profile = profileRes.data;
+    // Se o usuário ainda não tem perfil, retorna null (é novo)
+    if (!profile) return null;
+
+    const dividas = (debtsRes.data || []).map((d) => ({
+      id: String(d.id),
+      name: d.name,
+      totalCents: d.total_cents,
+      parcelaCents: d.installment_cents,
+    }));
+
+    const metas = (goalsRes.data || []).map((g) => ({
+      id: String(g.id),
+      title: g.title,
+      valueCents: g.target_cents,
+      months: g.months,
+      priority: g.priority,
+      progress: 0,
+    }));
+
+    const lancamentos = [
+      ...(incomesRes.data || []).map((i) => ({
+        id: `in-${i.id}`,
+        tipo: "receita",
+        descricao: i.description,
+        valueCents: i.amount_cents,
+        date: i.received_at,
+        isFixed: false,
+      })),
+      ...(expensesRes.data || []).map((e) => ({
+        id: `ex-${e.id}`,
+        tipo: "despesa",
+        descricao: e.description,
+        valueCents: e.amount_cents,
+        date: e.paid_at,
+        isFixed: e.is_fixed,
+      })),
+    ];
+
+    return {
+      nome: profile.name || "",
+      cidade: profile.city || "",
+      fonteRenda: profile.income_source || "",
+      rendaMediaCents: profile.income_cents || 0,
+      gastosFixosCents: profile.expenses_fixed_cents || 0,
+      reservaCents: profile.savings_cents || 0,
+      variacaoRenda: "",
+      familia: "",
+      gastosFixosList: [],
+      dividas,
+      metas,
+      metasRaw: "",
+      lancamentos,
+      completed: true,
+    };
+  } catch (e) {
+    console.error("Erro ao carregar do Supabase:", e);
+    return null;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
    ROTEIRO DE ONBOARDING
    ───────────────────────────────────────────────────────────── */
 const buildScript = () => [
@@ -2084,10 +2236,7 @@ function App() {
     (async () => {
       try { setApiKey(localStorage.getItem(API_KEY_STORAGE) || ""); } catch {}
 
-      const currentUser = await getCurrentUser();
-      if (currentUser) {
-        setUser(currentUser);
-        const saved = loadState();
+        const saved = await loadFromSupabase(currentUser.id);
         if (saved && saved.completed) {
           setState(saved);
           setScreen("dashboard");
@@ -2113,8 +2262,12 @@ function App() {
 
   // ─── Persistência ───────────────────────────────────────
   useEffect(() => {
-    if (screen === "dashboard") saveState(state);
-  }, [state, screen]);
+    if (screen === "dashboard" && user) {
+      saveToSupabase(user.id, state).then((res) => {
+        if (!res.ok) console.warn("Falha ao salvar:", res.error);
+      });
+    }
+  }, [state, screen, user]);
 
   const saveApiKey = (k) => {
     setApiKey(k);

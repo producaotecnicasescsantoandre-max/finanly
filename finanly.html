@@ -2236,6 +2236,9 @@ function App() {
     (async () => {
       try { setApiKey(localStorage.getItem(API_KEY_STORAGE) || ""); } catch {}
 
+      const currentUser = await getCurrentUser();
+      if (currentUser) {
+        setUser(currentUser);
         const saved = await loadFromSupabase(currentUser.id);
         if (saved && saved.completed) {
           setState(saved);

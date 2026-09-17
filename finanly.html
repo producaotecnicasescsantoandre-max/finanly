@@ -2227,7 +2227,6 @@ function App() {
   // ─── Boot: checa login e carrega dados ──────────────────
   useEffect(() => {
     (async () => {
-      try { setApiKey(localStorage.getItem(API_KEY_STORAGE) || ""); } catch {}
 
       const currentUser = await getCurrentUser();
       if (currentUser) {

@@ -534,6 +534,19 @@ async function runAIChat(apiKey, userMessage, history, state, onToolExecuted) {
    ESTADO INICIAL
    ───────────────────────────────────────────────────────────── */
 const EMPTY_STATE = {
+  nome: "",
+  familia: "",
+  cidade: "",
+  fonteRenda: "",
+  rendaMediaCents: 0,
+  variacaoRenda: "",
+  gastosFixosCents: 0,
+  gastosFixosList: [],
+  dividas: [],
+  reservaCents: 0,
+  metasRaw: "",
+  metas: [],
+  lancamentos: [],
   items: [],
   contas: [],
   investimentos: [],
@@ -542,18 +555,35 @@ const EMPTY_STATE = {
 };
 
 const DEMO_STATE = {
-  items: [
-    { id: "d1", tipo: "renda", descricao: "Salário CLT", valorBrutoCents: 850000, valorLiquidoCents: 620000, recorrencia: "mensal", mesInicio: "2026-01", contaId: null },
-    { id: "d2", tipo: "gasto", descricao: "Aluguel", valorBrutoCents: 180000, valorLiquidoCents: 180000, recorrencia: "mensal", mesInicio: "2026-01", fixo: true, contaId: null },
-    { id: "d3", tipo: "gasto", descricao: "Mercado", valorBrutoCents: 80000, valorLiquidoCents: 80000, recorrencia: "mensal", mesInicio: "2026-01", fixo: false, contaId: null },
+  nome: "Bruno",
+  familia: "Moro sozinho",
+  cidade: "São Paulo",
+  fonteRenda: "Freelas + pró-labore",
+  rendaMediaCents: 850000,
+  variacaoRenda: "Varia uns 30%",
+  gastosFixosCents: 277000,
+  gastosFixosList: [
+    { id: "1", name: "Aluguel", valueCents: 180000 },
+    { id: "2", name: "Internet + Luz", valueCents: 28000 },
+    { id: "3", name: "Plano de saúde", valueCents: 42000 },
+    { id: "4", name: "Academia", valueCents: 15000 },
+    { id: "5", name: "Streaming e apps", valueCents: 12000 },
   ],
-  contas: [
-    { id: "c1", descricao: "Nubank", saldoCents: 500000, isReserva: false },
-    { id: "c2", descricao: "Itaú", saldoCents: 300000, isReserva: false },
+  dividas: [
+    { id: "1", name: "Cartão Nubank", totalCents: 340000, parcelaCents: 110000 },
+    { id: "2", name: "Financiamento notebook", totalCents: 480000, parcelaCents: 40000 },
   ],
-  investimentos: [
-    { id: "i1", descricao: "Tesouro Selic", banco: "XP", valorAplicadoCents: 1000000, valorAtualCents: 1050000, taxa: 100, tipoTaxa: "cdi", liquidez: "D0", dataInicio: "2025-09", aporteMensalCents: 0, historico: [] },
+  reservaCents: 760000,
+  metasRaw: "reserva de 6 meses e viagem",
+  metas: [
+    { id: "1", title: "Reserva de 6 meses", valueCents: 1920000, months: 12, priority: "alta", progress: 39 },
+    { id: "2", title: "Viagem para Europa", valueCents: 1200000, months: 10, priority: "média", progress: 0 },
+    { id: "3", title: "Quitar dívidas", valueCents: 820000, months: 6, priority: "alta", progress: 0 },
   ],
+  lancamentos: [],
+  items: [],
+  contas: [],
+  investimentos: [],
   reservaConfig: { tipo: "meses", valor: 6 },
   completed: true,
 };
@@ -577,69 +607,72 @@ const loadState = () => {
 async function saveToSupabase(userId, state) {
   if (!userId) return { ok: false, error: "sem usuário" };
   try {
-    // 1) Items (rendas, gastos)
-    await supabase.from("items").delete().eq("user_id", userId);
-    if ((state.items || []).length > 0) {
-      const rows = state.items.map((it) => ({
-        id: it.id,
-        user_id: userId,
-        tipo: it.tipo,
-        descricao: it.descricao || null,
-        valor_bruto_cents: it.valorBrutoCents || 0,
-        valor_liquido_cents: it.valorLiquidoCents || 0,
-        recorrencia: it.recorrencia || null,
-        mes: it.mes || null,
-        mes_inicio: it.mesInicio || null,
-        mes_fim: it.mesFim || null,
-        fixo: it.fixo !== undefined ? it.fixo : null,
-        conta_id: it.contaId || null,
-      }));
-      await supabase.from("items").insert(rows);
-    }
-
-    // 2) Contas
-    await supabase.from("accounts").delete().eq("user_id", userId);
-    if ((state.contas || []).length > 0) {
-      const rows = state.contas.map((c) => ({
-        id: c.id,
-        user_id: userId,
-        descricao: c.descricao || "Conta",
-        saldo_cents: c.saldoCents || 0,
-        is_reserva: !!c.isReserva,
-      }));
-      await supabase.from("accounts").insert(rows);
-    }
-
-    // 3) Investimentos
-    await supabase.from("investments").delete().eq("user_id", userId);
-    if ((state.investimentos || []).length > 0) {
-      const rows = state.investimentos.map((inv) => ({
-        id: inv.id,
-        user_id: userId,
-        descricao: inv.descricao || "Investimento",
-        banco: inv.banco || null,
-        conta_vinculada_id: inv.contaVinculadaId || null,
-        saiu_da_conta: !!inv.saiuDaConta,
-        valor_aplicado_cents: inv.valorAplicadoCents || 0,
-        valor_atual_cents: inv.valorAtualCents || 0,
-        taxa: inv.taxa || 0,
-        tipo_taxa: inv.tipoTaxa || null,
-        liquidez: inv.liquidez || null,
-        data_inicio: inv.dataInicio || null,
-        data_fim: inv.dataFim || null,
-        aporte_mensal_cents: inv.aporteMensalCents || 0,
-        historico: inv.historico || [],
-      }));
-      await supabase.from("investments").insert(rows);
-    }
-
-    // 4) Config da reserva
-    const reservaCfg = state.reservaConfig || { tipo: "meses", valor: 6 };
-    await supabase.from("user_config").upsert({
+    // 1) Perfil
+    await supabase.from("profiles").upsert({
       user_id: userId,
-      reserva_tipo: reservaCfg.tipo,
-      reserva_valor: reservaCfg.valor,
+      name: state.nome || null,
+      city: state.cidade || null,
+      income_source: state.fonteRenda || null,
+      income_cents: state.rendaMediaCents || 0,
+      expenses_fixed_cents: state.gastosFixosCents || 0,
+      savings_cents: state.reservaCents || 0,
     }, { onConflict: "user_id" });
+
+    // 2) Dívidas — apaga as antigas e insere as atuais
+    await supabase.from("debts").delete().eq("user_id", userId);
+    if ((state.dividas || []).length > 0) {
+      await supabase.from("debts").insert(
+        state.dividas.map((d) => ({
+          user_id: userId,
+          name: d.name || "Dívida",
+          total_cents: d.totalCents || 0,
+          installment_cents: d.parcelaCents || 0,
+        }))
+      );
+    }
+
+    // 3) Metas — apaga as antigas e insere as atuais
+    await supabase.from("goals").delete().eq("user_id", userId);
+    if ((state.metas || []).length > 0) {
+      await supabase.from("goals").insert(
+        state.metas.map((m) => ({
+          user_id: userId,
+          title: m.title || "Meta",
+          target_cents: m.valueCents || 0,
+          months: m.months || 12,
+          priority: m.priority || "média",
+        }))
+      );
+    }
+
+    // 4) Lançamentos — apaga os antigos e insere os atuais
+    await supabase.from("incomes").delete().eq("user_id", userId);
+    await supabase.from("expenses").delete().eq("user_id", userId);
+
+    const receitas = (state.lancamentos || []).filter(l => l.tipo === "receita");
+    const despesas = (state.lancamentos || []).filter(l => l.tipo === "despesa");
+
+    if (receitas.length > 0) {
+      await supabase.from("incomes").insert(
+        receitas.map((r) => ({
+          user_id: userId,
+          description: r.descricao || "Receita",
+          amount_cents: r.valueCents || 0,
+          received_at: new Date(r.date || Date.now()).toISOString().split("T")[0],
+        }))
+      );
+    }
+    if (despesas.length > 0) {
+      await supabase.from("expenses").insert(
+        despesas.map((d) => ({
+          user_id: userId,
+          description: d.descricao || "Despesa",
+          amount_cents: d.valueCents || 0,
+          paid_at: new Date(d.date || Date.now()).toISOString().split("T")[0],
+          is_fixed: !!d.isFixed,
+        }))
+      );
+    }
 
     return { ok: true };
   } catch (e) {
@@ -651,66 +684,67 @@ async function saveToSupabase(userId, state) {
 async function loadFromSupabase(userId) {
   if (!userId) return null;
   try {
-    const [itemsRes, contasRes, invRes, cfgRes] = await Promise.all([
-      supabase.from("items").select("*").eq("user_id", userId),
-      supabase.from("accounts").select("*").eq("user_id", userId),
-      supabase.from("investments").select("*").eq("user_id", userId),
-      supabase.from("user_config").select("*").eq("user_id", userId).maybeSingle(),
+    const [profileRes, debtsRes, goalsRes, incomesRes, expensesRes] = await Promise.all([
+      supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
+      supabase.from("debts").select("*").eq("user_id", userId),
+      supabase.from("goals").select("*").eq("user_id", userId),
+      supabase.from("incomes").select("*").eq("user_id", userId),
+      supabase.from("expenses").select("*").eq("user_id", userId),
     ]);
 
-    const items = (itemsRes.data || []).map((r) => ({
-      id: r.id,
-      tipo: r.tipo,
-      descricao: r.descricao || "",
-      valorBrutoCents: r.valor_bruto_cents || 0,
-      valorLiquidoCents: r.valor_liquido_cents || 0,
-      recorrencia: r.recorrencia || "pontual",
-      mes: r.mes || undefined,
-      mesInicio: r.mes_inicio || undefined,
-      mesFim: r.mes_fim || undefined,
-      fixo: r.fixo,
-      contaId: r.conta_id || null,
+    const profile = profileRes.data;
+    // Se o usuário ainda não tem perfil, retorna null (é novo)
+    if (!profile) return null;
+
+    const dividas = (debtsRes.data || []).map((d) => ({
+      id: String(d.id),
+      name: d.name,
+      totalCents: d.total_cents,
+      parcelaCents: d.installment_cents,
     }));
 
-    const contas = (contasRes.data || []).map((r) => ({
-      id: r.id,
-      descricao: r.descricao,
-      saldoCents: r.saldo_cents || 0,
-      isReserva: !!r.is_reserva,
+    const metas = (goalsRes.data || []).map((g) => ({
+      id: String(g.id),
+      title: g.title,
+      valueCents: g.target_cents,
+      months: g.months,
+      priority: g.priority,
+      progress: 0,
     }));
 
-    const investimentos = (invRes.data || []).map((r) => ({
-      id: r.id,
-      descricao: r.descricao,
-      banco: r.banco || "",
-      contaVinculadaId: r.conta_vinculada_id || null,
-      saiuDaConta: !!r.saiu_da_conta,
-      valorAplicadoCents: r.valor_aplicado_cents || 0,
-      valorAtualCents: r.valor_atual_cents || 0,
-      taxa: r.taxa || 0,
-      tipoTaxa: r.tipo_taxa || "anual",
-      liquidez: r.liquidez || "D0",
-      dataInicio: r.data_inicio || null,
-      dataFim: r.data_fim || null,
-      aporteMensalCents: r.aporte_mensal_cents || 0,
-      historico: Array.isArray(r.historico) ? r.historico : [],
-    }));
-
-    const cfg = cfgRes.data;
-    const reservaConfig = cfg
-      ? { tipo: cfg.reserva_tipo || "meses", valor: Number(cfg.reserva_valor) || 6 }
-      : { tipo: "meses", valor: 6 };
-
-    // Se o usuário não tem NADA no banco, retorna null (é novo)
-    if (items.length === 0 && contas.length === 0 && investimentos.length === 0 && !cfg) {
-      return null;
-    }
+    const lancamentos = [
+      ...(incomesRes.data || []).map((i) => ({
+        id: `in-${i.id}`,
+        tipo: "receita",
+        descricao: i.description,
+        valueCents: i.amount_cents,
+        date: i.received_at,
+        isFixed: false,
+      })),
+      ...(expensesRes.data || []).map((e) => ({
+        id: `ex-${e.id}`,
+        tipo: "despesa",
+        descricao: e.description,
+        valueCents: e.amount_cents,
+        date: e.paid_at,
+        isFixed: e.is_fixed,
+      })),
+    ];
 
     return {
-      items,
-      contas,
-      investimentos,
-      reservaConfig,
+      nome: profile.name || "",
+      cidade: profile.city || "",
+      fonteRenda: profile.income_source || "",
+      rendaMediaCents: profile.income_cents || 0,
+      gastosFixosCents: profile.expenses_fixed_cents || 0,
+      reservaCents: profile.savings_cents || 0,
+      variacaoRenda: "",
+      familia: "",
+      gastosFixosList: [],
+      dividas,
+      metas,
+      metasRaw: "",
+      lancamentos,
       completed: true,
     };
   } catch (e) {
@@ -718,7 +752,6 @@ async function loadFromSupabase(userId) {
     return null;
   }
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    ROTEIRO DE ONBOARDING
@@ -1562,18 +1595,442 @@ function ConsultantChat({ state, setState, apiKey, onNeedApiKey }) {
 }
 
 
-/* ── Painel Visão Geral (novo) ────────────────────────────── */
+/* ── Dashboard ─────────────────────────────────────────────── */
+function Dashboard({ state, setState, onReset, apiKey, onNeedApiKey, user }) {
+  const [tab, setTab] = useState("overview");
+  const [scenario, setScenario] = useState("equilibrado");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showNewEntry, setShowNewEntry] = useState(false);
+  const [goalModal, setGoalModal] = useState(null); // null | {} | goal
+  const [highlight, setHighlight] = useState(null);
+  const [flash, setFlash] = useState(false);
+
+  const margin = Finance.monthlyMargin(state);
+  const emergMonths = Finance.emergencyMonths(state);
+  const fixed = Finance.monthlyFixed(state);
+  const installments = Finance.monthlyInstallments(state);
+  const totalDebt = Finance.totalDebt(state);
+  const targetMonths = Finance.emergencyTargetMonths(state);
+  const scenarios = Finance.scenarios(state);
+
+  const tabs = [
+    { id: "overview", label: "Visão Geral", icon: I.House },
+    { id: "plano", label: "Meu Plano", icon: I.Target },
+    { id: "vida", label: "Vida Financeira", icon: I.Wallet },
+    { id: "patrimonio", label: "Patrimônio", icon: I.Building2 },
+    { id: "conversar", label: "Conversar", icon: I.MessageCircle },
+    { id: "pendencias", label: "Pendências", icon: I.CircleAlert, badge: 3 },
+  ];
+
+  const flashNumber = () => {
+    setFlash(true);
+    setTimeout(() => setFlash(false), 600);
+  };
+
+  useEffect(() => { flashNumber(); }, [state.rendaMediaCents, state.gastosFixosCents, state.reservaCents]);
+
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "claro-dados.json"; a.click();
+  };
+
+  const addEntry = (entry) => {
+    setState((s) => {
+      const next = { ...s, lancamentos: [...(s.lancamentos || []), entry] };
+      // Se for despesa fixa, soma aos gastos fixos; se receita, soma à renda
+      if (entry.tipo === "despesa" && entry.isFixed) {
+        next.gastosFixosCents = (s.gastosFixosCents || 0) + entry.valueCents;
+        next.gastosFixosList = [...(s.gastosFixosList || []), { id: entry.id, name: entry.descricao, valueCents: entry.valueCents }];
+      }
+      return next;
+    });
+    setShowNewEntry(false);
+  };
+
+  const saveGoal = (goal) => {
+    setState((s) => {
+      const exists = s.metas.some((m) => m.id === goal.id);
+      const metas = exists ? s.metas.map((m) => (m.id === goal.id ? goal : m)) : [...s.metas, goal];
+      return { ...s, metas };
+    });
+    setGoalModal(null);
+  };
+
+  const removeGoal = (id) => {
+    setState((s) => ({ ...s, metas: s.metas.filter((m) => m.id !== id) }));
+  };
+
+  const flow = [
+    { label: "Entradas", value: state.rendaMediaCents, color: "#111" },
+    { label: "Fixos", value: fixed, color: "#E8DDD0" },
+    { label: "Parcelas", value: installments, color: "#D4C4B0" },
+    { label: "Margem", value: margin, color: "#7A9E7E" },
+  ];
+
+  const goals = state.metas || [];
+
+  return (
+    <div className="min-h-screen bg-[#FAF9F7] text-[#111]">
+      {/* Mobile header */}
+      <div className="lg:hidden sticky top-0 z-30 bg-[#FAF9F7]/90 backdrop-blur-xl border-b border-[#E8DDD0]/60 px-5 h-[56px] flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <Avatar size={28} />
+          <span className="text-[14px] font-semibold tracking-tight">Claro</span>
+          <span className="ml-2 text-[11px] text-[#8A7F76] flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#7A9E7E] animate-pulse" /> {state.nome}
+          </span>
+        </div>
+        <button onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu" className="w-8 h-8 rounded-full bg-white border border-[#E8DDD0] flex items-center justify-center">
+          {menuOpen ? <I.X size={16} /> : <I.Menu size={16} />}
+        </button>
+      </div>
+
+      <div className="flex">
+        {/* Sidebar desktop */}
+        <aside className="hidden lg:flex w-[240px] shrink-0 sticky top-0 h-screen p-6 flex-col">
+          <div className="flex items-center gap-3 mb-10">
+            <Avatar />
+            <span className="text-[15px] font-semibold tracking-tight">Claro</span>
+          </div>
+          <nav className="space-y-1 flex-1">
+            {tabs.map((t) => (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium transition text-left ${tab === t.id ? "bg-[#111] text-white shadow-sm" : "text-[#6B5F57] hover:bg-white hover:text-[#111]"}`}>
+                <t.icon size={18} /> {t.label}
+                {t.badge && <span className="ml-auto text-[11px] bg-[#7A9E7E] text-white px-2 py-0.5 rounded-full">{t.badge}</span>}
+              </button>
+            ))}
+          </nav>
+          <div className="mt-auto space-y-3">
+            <div className="bg-white rounded-2xl border border-[#E8DDD0] p-4">
+              <p className="text-[12px] font-medium flex items-center gap-1.5">
+                <I.Shield size={14} className="text-[#7A9E7E]" /> Seus dados
+              </p>
+              <p className="text-[11px] text-[#8A7F76] mt-1 leading-[1.4]">
+                Armazenados localmente neste navegador. Cálculos por código auditável.
+              </p>
+              <div className="flex gap-2 mt-3">
+                <button onClick={exportJSON} className="text-[11px] flex items-center gap-1 px-2.5 py-1.5 rounded-full border border-[#E8DDD0] hover:border-[#111] transition">
+                  <I.Download size={12} /> Exportar
+                </button>
+                <button onClick={onReset} className="text-[11px] flex items-center gap-1 px-2.5 py-1.5 rounded-full border border-[#E8DDD0] hover:border-red-300 hover:text-red-600 transition">
+                  <I.Trash2 size={12} /> Apagar
+                </button>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        {/* Mobile menu overlay */}
+        {menuOpen && (
+          <div className="lg:hidden fixed inset-0 z-40 bg-[#FAF9F7] pt-[56px] p-5">
+            <nav className="space-y-1">
+              {tabs.map((t) => (
+                <button key={t.id} onClick={() => { setTab(t.id); setMenuOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-[15px] font-medium ${tab === t.id ? "bg-[#111] text-white" : "bg-white border border-[#E8DDD0] text-[#111]"}`}>
+                  <t.icon size={20} /> {t.label}
+                  {t.badge && <span className="ml-auto text-[12px] bg-[#7A9E7E] text-white px-2 py-0.5 rounded-full">{t.badge}</span>}
+                </button>
+              ))}
+            </nav>
+          </div>
+        )}
+
+        <main className="flex-1 min-w-0">
+          <div className="max-w-[1120px] mx-auto px-5 lg:px-10 py-6 lg:py-10">
+            {/* Header */}
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-8">
+              <div>
+                <h1 className="text-[28px] lg:text-[32px] font-light tracking-[-0.02em] leading-[1.1]">
+                  Bom dia, {state.nome || "Bruno"}.<br />
+                  <span className="font-medium">
+                    Sua margem este mês é de{" "}
+                    <span className={flash ? "text-[#7A9E7E] transition-colors" : "transition-colors"}>{brl(margin)}</span>
+                  </span>
+                </h1>
+                <p className="text-[14px] text-[#8A7F76] mt-3 max-w-[520px] leading-[1.5]">
+                  Hoje você tem {brl(margin)} livres depois dos compromissos. Sua reserva cobre {emergMonths.toFixed(1)} meses.
+                  Seu principal foco agora é reserva + dívidas.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <div className="bg-white border border-[#E8DDD0] rounded-full px-3.5 py-2 flex items-center gap-2 text-[12px]">
+                  <span className="w-2 h-2 rounded-full bg-[#7A9E7E]" /> Plano equilibrado ativo
+                </div>
+              </div>
+            </div>
+
+            {tab === "overview" && (
+              <PainelVisaoGeral
+                items={state.items || state.lancamentos || []}
+                contas={state.contas || []}
+                investimentos={state.investimentos || []}
+                reservaConfig={state.reservaConfig || { tipo: "meses", valor: 6 }}
+                setState={setState}
+              />
+            )}
+
+            {tab === "plano" && (
+              <div className="space-y-6">
+                <div className="bg-[#111] text-white rounded-[28px] p-8 lg:p-10">
+                  <p className="text-[12px] tracking-[0.14em] uppercase text-white/50">Seu retrato financeiro</p>
+                  <h2 className="text-[22px] lg:text-[26px] font-light leading-[1.2] mt-3 max-w-[640px]">
+                    Você tem uma margem estimada de {brl(margin)} por mês. Se mantiver este ritmo, sua reserva cobre aproximadamente {emergMonths.toFixed(1)} meses.
+                    {" "}Sua principal oportunidade neste momento é {installments > margin * 0.3 ? "reorganizar suas parcelas" : "aumentar sua reserva"}.
+                  </h2>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mt-8 pt-8 border-t border-white/10">
+                    {[
+                      ["Receitas", state.rendaMediaCents],
+                      ["Gastos fixos", fixed],
+                      ["Dívidas", totalDebt],
+                      ["Reserva", state.reservaCents],
+                    ].map(([label, val]) => (
+                      <div key={label}>
+                        <p className="text-[11px] uppercase tracking-wide text-white/50">{label}</p>
+                        <p className="text-[18px] font-medium mt-1">{brl(val)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[16px] font-medium">Suas metas</h3>
+                  <button onClick={() => setGoalModal({})}
+                    className="text-[13px] bg-[#111] text-white px-4 py-2 rounded-full flex items-center gap-2 hover:bg-black transition">
+                    <I.Plus size={14} /> Nova meta
+                  </button>
+                </div>
+
+                <div className="grid lg:grid-cols-2 gap-4">
+                  {goals.length === 0 && (
+                    <div className="bg-white rounded-[24px] border border-[#E8DDD0]/80 p-6 text-[13px] text-[#8A7F76]">
+                      Nenhuma meta cadastrada. Toque em "Nova meta" para começar.
+                    </div>
+                  )}
+                  {goals.map((g) => {
+                    const perMonth = g.months > 0 ? Math.ceil(g.valueCents / g.months) : 0;
+                    return (
+                      <div key={g.id} className="bg-white rounded-[24px] border border-[#E8DDD0]/80 p-6">
+                        <div className="flex justify-between items-start">
+                          <h4 className="font-medium">{g.title}</h4>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] bg-[#FAF9F7] border border-[#E8DDD0] px-2 py-1 rounded-full">{g.months} meses</span>
+                            <button onClick={() => setGoalModal(g)} aria-label="Editar" className="text-[11px] text-[#8A7F76] hover:text-[#111]">editar</button>
+                            <button onClick={() => removeGoal(g.id)} aria-label="Remover" className="text-[11px] text-[#8A7F76] hover:text-red-600">remover</button>
+                          </div>
+                        </div>
+                        <p className="text-[13px] text-[#8A7F76] mt-2">
+                          Para atingir sua meta em {g.months} meses, você precisaria separar aproximadamente {brl(perMonth)} por mês
+                          {perMonth <= margin ? " — viável no cenário equilibrado." : " — apertado, vale revisar prazo."}
+                        </p>
+                        <div className="mt-4 h-2 bg-[#F2EDE8] rounded-full overflow-hidden">
+                          <div className="h-full bg-[#7A9E7E] rounded-full transition-all" style={{ width: `${g.progress}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {tab === "vida" && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-[18px] font-medium">Vida Financeira</h2>
+                  <button onClick={() => setShowNewEntry(true)}
+                    className="text-[13px] bg-[#111] text-white px-4 py-2 rounded-full flex items-center gap-2 hover:bg-black transition">
+                    <I.Plus size={14} /> Novo lançamento
+                  </button>
+                </div>
+
+                <div className="grid lg:grid-cols-2 gap-4">
+                  <div className="bg-white rounded-[24px] border border-[#E8DDD0]/80 p-6">
+                    <h3 className="text-[13px] font-medium uppercase tracking-wide text-[#9C8F85] flex items-center gap-2">
+                      <I.Wallet size={16} /> Receitas
+                    </h3>
+                    <div className="mt-4 p-4 bg-[#FAF9F7] rounded-2xl flex justify-between">
+                      <div>
+                        <p className="text-[13px] font-medium">{state.fonteRenda || "Renda principal"}</p>
+                        <p className="text-[11px] text-[#8A7F76]">{state.variacaoRenda || "Média últimos 3 meses"}</p>
+                      </div>
+                      <p className="font-medium">{brl(state.rendaMediaCents)}</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-[24px] border border-[#E8DDD0]/80 p-6">
+                    <h3 className="text-[13px] font-medium uppercase tracking-wide text-[#9C8F85] flex items-center gap-2">
+                      <I.ChartPie size={16} /> Despesas fixas
+                    </h3>
+                    <div className="mt-4 space-y-2">
+                      {(state.gastosFixosList.length ? state.gastosFixosList : [{ id: "1", name: "Gastos fixos", valueCents: fixed }]).map((e) => (
+                        <div key={e.id} className="flex justify-between py-2 border-b border-[#F2EDE8] last:border-0">
+                          <span className="text-[13px]">{e.name}</span>
+                          <span className="text-[13px] font-medium">{brl(e.valueCents)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-[24px] border border-[#E8DDD0]/80 p-6">
+                    <h3 className="text-[13px] font-medium uppercase tracking-wide text-[#9C8F85] flex items-center gap-2">
+                      <I.CreditCard size={16} /> Dívidas & Cartões
+                    </h3>
+                    <div className="mt-4 space-y-3">
+                      {(state.dividas || []).map((d) => (
+                        <div key={d.id} className="p-3 rounded-2xl bg-[#FEF6F3] border border-[#E8DDD0] flex justify-between">
+                          <div>
+                            <p className="text-[13px] font-medium">{d.name}</p>
+                            <p className="text-[11px] text-[#8A7F76]">Parcela {brl(d.parcelaCents)}</p>
+                          </div>
+                          <p className="text-[13px] font-medium">{brl(d.totalCents)}</p>
+                        </div>
+                      ))}
+                      {(state.dividas || []).length === 0 && (
+                        <p className="text-[13px] text-[#8A7F76]">Nenhuma dívida registrada. Ótimo sinal.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-[24px] border border-[#E8DDD0]/80 p-6">
+                    <h3 className="text-[13px] font-medium uppercase tracking-wide text-[#9C8F85] flex items-center gap-2">
+                      <I.Layers size={16} /> Lançamentos manuais
+                    </h3>
+                    <div className="mt-4 space-y-2 max-h-[220px] overflow-y-auto">
+                      {(state.lancamentos || []).length === 0 && (
+                        <p className="text-[12px] text-[#8A7F76]">Nenhum lançamento manual ainda. Use o botão "Novo lançamento".</p>
+                      )}
+                      {(state.lancamentos || []).slice().reverse().map((l) => (
+                        <div key={l.id} className="flex justify-between py-2 border-b border-[#F2EDE8] last:border-0">
+                          <div>
+                            <p className="text-[13px]">{l.descricao}</p>
+                            <p className="text-[11px] text-[#8A7F76] capitalize">{l.tipo}{l.isFixed ? " • fixo" : ""}</p>
+                          </div>
+                          <span className={`text-[13px] font-medium ${l.tipo === "receita" ? "text-[#7A9E7E]" : "text-[#111]"}`}>
+                            {l.tipo === "receita" ? "+" : "−"} {brl(l.valueCents)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-[24px] border border-[#E8DDD0]/80 p-6">
+                  <h3 className="text-[13px] font-medium uppercase tracking-wide text-[#9C8F85]">Resumo LGPD</h3>
+                  <p className="text-[12px] text-[#8A7F76] mt-3 leading-[1.5]">
+                    Dados armazenados localmente neste navegador. Você pode exportar ou apagar tudo a qualquer momento. Nenhum dado é enviado para servidores sem seu consentimento.
+                  </p>
+                  <div className="flex gap-2 mt-4">
+                    <button onClick={exportJSON} className="text-[12px] border border-[#E8DDD0] rounded-full px-3 py-1.5 flex items-center gap-1 hover:border-[#111] transition">
+                      <I.Download size={12} /> Exportar JSON
+                    </button>
+                    <button onClick={onReset} className="text-[12px] border border-[#E8DDD0] rounded-full px-3 py-1.5 flex items-center gap-1 hover:border-red-300 hover:text-red-600 transition">
+                      <I.Trash2 size={12} /> Apagar tudo
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === "patrimonio" && (
+              <div className="space-y-6">
+                <h2 className="text-[18px] font-medium">Patrimônio</h2>
+                <div className="grid lg:grid-cols-3 gap-4">
+                  <div className="bg-white rounded-[24px] border border-[#E8DDD0]/80 p-6">
+                    <p className="text-[11px] uppercase tracking-wide text-[#9C8F85]">Contas</p>
+                    <p className="text-[22px] font-light mt-2">{brl(state.reservaCents)}</p>
+                    <p className="text-[12px] text-[#8A7F76] mt-1">Reserva em conta corrente</p>
+                  </div>
+                  <div className="bg-white rounded-[24px] border border-[#E8DDD0]/80 p-6">
+                    <p className="text-[11px] uppercase tracking-wide text-[#9C8F85]">Investimentos</p>
+                    <p className="text-[22px] font-light mt-2">{brl(0)}</p>
+                    <p className="text-[12px] text-[#8A7F76] mt-1">Ainda não informado. Foco em reserva primeiro.</p>
+                  </div>
+                  <div className="bg-white rounded-[24px] border border-[#E8DDD0]/80 p-6">
+                    <p className="text-[11px] uppercase tracking-wide text-[#9C8F85]">Evolução</p>
+                    <div className="flex items-end gap-1.5 mt-4 h-[36px]">
+                      {[20, 35, 28, 45, 60, 52, 70].map((v, i) => (
+                        <div key={i} className="flex-1 bg-[#E8DDD0] rounded-full" style={{ height: `${v}%` }} />
+                      ))}
+                      <div className="flex-1 bg-[#111] rounded-full" style={{ height: "78%" }} />
+                    </div>
+                    <p className="text-[11px] text-[#8A7F76] mt-2">+12% nos últimos 3 meses</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+{tab === "conversar" && (
+  <ConsultantChat
+    state={state}
+    setState={setState}
+    apiKey={apiKey}
+    onNeedApiKey={onNeedApiKey}
+  />
+)}
+
+            {tab === "pendencias" && (
+              <div className="max-w-[640px] space-y-4">
+                <h2 className="text-[18px] font-medium">Central de pendências</h2>
+                <p className="text-[13px] text-[#8A7F76]">
+                  Perguntas que preciso te fazer para melhorar seu plano. Sem pressa, vamos uma por vez.
+                </p>
+                {[
+                  { id: "1", title: "Classificar 3 gastos", desc: "Detectei 3 lançamentos como 'outros'. Você pode me dizer o que são?", action: "Classificar agora" },
+                  { id: "2", title: "Confirmar vencimento da fatura", desc: "Sua fatura do cartão vence dia 8 ou 12? Isso ajuda nos alertas.", action: "Confirmar" },
+                  { id: "3", title: "Falta informar taxa do financiamento", desc: "Para calcular economia ao antecipar, preciso da taxa de juros.", action: "Informar taxa" },
+                ].map((p) => (
+                  <div key={p.id} className="bg-white rounded-[20px] border border-[#E8DDD0]/80 p-5 flex items-start justify-between gap-4">
+                    <div className="flex gap-3">
+                      <div className="w-8 h-8 rounded-full bg-[#FEF6F3] border border-[#E8DDD0] flex items-center justify-center shrink-0">
+                        <I.CircleAlert size={16} className="text-[#C86B5A]" />
+                      </div>
+                      <div>
+                        <p className="text-[14px] font-medium">{p.title}</p>
+                        <p className="text-[12px] text-[#8A7F76] mt-1 leading-[1.4]">{p.desc}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setTab("conversar")}
+                      className="text-[12px] bg-[#111] text-white px-3.5 py-1.5 rounded-full shrink-0 hover:bg-black transition">
+                      {p.action}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Bottom nav mobile */}
+          <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white/90 backdrop-blur-xl border-t border-[#E8DDD0] px-2 py-2 flex justify-around">
+            {tabs.slice(0, 5).map((t) => (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-2xl ${tab === t.id ? "text-[#111]" : "text-[#9C8F85]"}`}>
+                <t.icon size={20} />
+                <span className="text-[10px] font-medium">{t.label.split(" ")[0]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="lg:hidden h-[72px]" />
+        </main>
+      </div>
+
+      {showNewEntry && <NewEntryModal onClose={() => setShowNewEntry(false)} onSave={addEntry} />}
+      {goalModal && <GoalModal initial={goalModal.id ? goalModal : null} onClose={() => setGoalModal(null)} onSave={saveGoal} />}
+    </div>
+  );
+}
+
+/* ── Funções do painel novo (Visão Geral) ──────────────────── */
 const KEY_MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
                    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
-function mk(y, m) { return `${y}-${String(m+1).padStart(2,"0")}`; }
+function mkAnoMes(y, m) { return `${y}-${String(m+1).padStart(2,"0")}`; }
 
 function itemsDoMes(items, y, m) {
-  const alvo = mk(y, m);
+  const alvo = mkAnoMes(y, m);
   return items.filter((it) => {
-    if (!it.recorrencia || it.recorrencia === "pontual") {
-      return it.mes === alvo;
-    }
+    if (!it.recorrencia || it.recorrencia === "pontual") return it.mes === alvo;
     if (it.recorrencia === "mensal") {
       if (it.mesInicio > alvo) return false;
       if (it.mesFim && it.mesFim < alvo) return false;
@@ -1594,13 +2051,11 @@ function taxaMensalInv(inv) {
   if (inv.tipoTaxa === "mensal") return t / 100;
   if (inv.tipoTaxa === "anual") return Math.pow(1 + t / 100, 1 / 12) - 1;
   if (inv.tipoTaxa === "cdi") {
-    const cdiAnual = 10.65;
-    const efetiva = cdiAnual * (t / 100);
+    const efetiva = 10.65 * (t / 100);
     return Math.pow(1 + efetiva / 100, 1 / 12) - 1;
   }
   if (inv.tipoTaxa === "selic") {
-    const selicAnual = 10.65;
-    const efetiva = selicAnual * (t / 100);
+    const efetiva = 10.65 * (t / 100);
     return Math.pow(1 + efetiva / 100, 1 / 12) - 1;
   }
   return 0;
@@ -1621,18 +2076,8 @@ function esperadoHojeInv(inv) {
   return Math.round(base * Math.pow(1 + r, meses));
 }
 
-function projetarInv(inv, meses) {
-  const r = taxaMensalInv(inv);
-  const base = inv.valorAtualCents || inv.valorAplicadoCents || 0;
-  const aporte = inv.aporteMensalCents || 0;
-  if (r === 0 && aporte === 0) return base;
-  if (r === 0) return base + aporte * meses;
-  const fator = Math.pow(1 + r, meses);
-  return Math.round(base * fator + aporte * (fator - 1) / r);
-}
-
 function calcularSaldoConta(conta, items, investimentos) {
-  const movimentos = items.filter((i) => i.contaId === conta.id);
+  const movimentos = (items || []).filter((i) => i.contaId === conta.id);
   let saldo = conta.saldoCents || 0;
   for (const m of movimentos) {
     const valor = m.valorLiquidoCents || m.valorBrutoCents || 0;
@@ -1658,282 +2103,134 @@ function saldoReserva(investimentos) {
     .reduce((s, i) => s + (i.valorAtualCents || i.valorAplicadoCents || 0), 0);
 }
 
-/* Modal de item (renda, gasto, conta, investimento) */
-function ModalItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
-  const ehConta = tipo === "conta";
-  const ehInvestimento = tipo === "investimento";
+/* ── PAINEL VISÃO GERAL (novo) ─────────────────────────────── */
+function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setState }) {
+  const agora = new Date();
+  const [ano, setAno] = useState(agora.getFullYear());
+  const [mes, setMes] = useState(agora.getMonth());
+  const [modal, setModal] = useState(null);
+  const [reservaModal, setReservaModal] = useState(false);
 
-  const [descricao, setDescricao] = useState(initial?.descricao || "");
-  const [bruto, setBruto] = useState(initial ? ((initial.valorBrutoCents || initial.saldoCents || 0)/100).toString() : "");
-  const [liquido, setLiquido] = useState(
-    initial?.valorLiquidoCents && initial.valorLiquidoCents !== initial.valorBrutoCents
-      ? (initial.valorLiquidoCents/100).toString() : ""
-  );
-  const [rec, setRec] = useState(initial?.recorrencia || "pontual");
-  const [mesInicio, setMesInicio] = useState(initial?.mesInicio || initial?.mes || mesAtual);
-  const [temFim, setTemFim] = useState(!!initial?.mesFim);
-  const [mesFim, setMesFim] = useState(initial?.mesFim || "");
-  const [fixo, setFixo] = useState(initial?.fixo !== undefined ? initial.fixo : true);
-  const [contaId, setContaId] = useState(initial?.contaId || "");
-
-  const [banco, setBanco] = useState(initial?.banco || "");
-  const [valorAplicado, setValorAplicado] = useState(
-    initial?.valorAplicadoCents ? (initial.valorAplicadoCents/100).toString() : ""
-  );
-  const [valorAtual, setValorAtual] = useState(
-    initial?.valorAtualCents ? (initial.valorAtualCents/100).toString() : ""
-  );
-  const [taxa, setTaxa] = useState(initial?.taxa ? initial.taxa.toString() : "");
-  const [tipoTaxa, setTipoTaxa] = useState(initial?.tipoTaxa || "anual");
-  const [liquidez, setLiquidez] = useState(initial?.liquidez || "D0");
-  const [dataInicio, setDataInicio] = useState(initial?.dataInicio || mesAtual);
-  const [contaVinculada, setContaVinculada] = useState(initial?.contaVinculadaId || "");
-  const [saiuDaConta, setSaiuDaConta] = useState(initial?.saiuDaConta || false);
-  const [dataFim, setDataFim] = useState(initial?.dataFim || "");
-  const [aporteMensal, setAporteMensal] = useState(
-    initial?.aporteMensalCents ? (initial.aporteMensalCents/100).toString() : ""
-  );
-
-  const brutoCents = parseMoneyToCents(bruto);
-  const aplicadoCents = parseMoneyToCents(valorAplicado);
-  const atualCents = parseMoneyToCents(valorAtual);
-  const aporteCents = parseMoneyToCents(aporteMensal);
-
-  const podeSalvar = ehInvestimento
-    ? descricao.trim().length > 0 && aplicadoCents > 0
-    : descricao.trim().length > 0 && (brutoCents > 0 || (ehConta && brutoCents >= 0));
-
-  const titulo = {
-    renda: "renda",
-    gasto: "gasto",
-    conta: "conta",
-    investimento: "investimento",
-  }[tipo] || "item";
-
-  const salvar = () => {
-    if (!podeSalvar) return;
-
-    if (ehInvestimento) {
-      onSave({
-        id: initial?.id || `inv-${Date.now()}-${Math.floor(Math.random()*1e6)}`,
-        tipo: "investimento",
-        descricao: descricao.trim(),
-        banco: banco.trim(),
-        contaVinculadaId: contaVinculada || null,
-        saiuDaConta: !!saiuDaConta,
-        valorAplicadoCents: aplicadoCents,
-        valorAtualCents: atualCents || aplicadoCents,
-        taxa: parseFloat(taxa) || 0,
-        tipoTaxa,
-        liquidez,
-        dataInicio,
-        dataFim: dataFim || null,
-        aporteMensalCents: aporteCents,
-        historico: initial?.historico || [],
-      });
-      return;
-    }
-
-    if (ehConta) {
-      onSave({
-        id: initial?.id || `c-${Date.now()}-${Math.floor(Math.random()*1e6)}`,
-        tipo: "conta",
-        descricao: descricao.trim(),
-        saldoCents: brutoCents,
-        isReserva: false,
-      });
-      return;
-    }
-
-    const liqCents = liquido ? parseMoneyToCents(liquido) : brutoCents;
-    const base = {
-      id: initial?.id || `it-${Date.now()}-${Math.floor(Math.random()*1e6)}`,
-      tipo,
-      descricao: descricao.trim(),
-      valorBrutoCents: brutoCents,
-      valorLiquidoCents: liqCents,
-      recorrencia: rec,
-      contaId: contaId || null,
-    };
-    if (tipo === "gasto") base.fixo = fixo;
-    if (rec === "pontual") {
-      base.mes = mesInicio;
-    } else {
-      base.mesInicio = mesInicio;
-      if (temFim && mesFim) base.mesFim = mesFim;
-    }
-    onSave(base);
+  const mesAtual = mkAnoMes(ano, mes);
+  const navegar = (d) => {
+    let m = mes + d, y = ano;
+    if (m < 0) { m = 11; y--; }
+    if (m > 11) { m = 0; y++; }
+    setMes(m); setAno(y);
   };
 
+  const rendas = itemsDoMes(items.filter(i => i.tipo === "renda"), ano, mes);
+  const gastos = itemsDoMes(items.filter(i => i.tipo === "gasto"), ano, mes);
+
+  const ehMesAtual = ano === agora.getFullYear() && mes === agora.getMonth();
+
+  const salvarItem = (item) => {
+    setState((s) => {
+      if (item.tipo === "conta") {
+        const existe = s.contas.some(c => c.id === item.id);
+        return { ...s, contas: existe ? s.contas.map(c => c.id === item.id ? item : c) : [...s.contas, item] };
+      }
+      if (item.tipo === "investimento") {
+        const existe = s.investimentos.some(i => i.id === item.id);
+        return { ...s, investimentos: existe ? s.investimentos.map(i => i.id === item.id ? item : i) : [...s.investimentos, item] };
+      }
+      const existe = s.items.some(i => i.id === item.id);
+      return { ...s, items: existe ? s.items.map(i => i.id === item.id ? item : i) : [...s.items, item] };
+    });
+    setModal(null);
+  };
+
+  const apagarItem = (id) => {
+    if (!confirm("Apagar este item?")) return;
+    setState(s => ({ ...s, items: s.items.filter(i => i.id !== id) }));
+  };
+  const apagarConta = (id) => {
+    if (!confirm("Apagar esta conta?")) return;
+    setState(s => ({ ...s, contas: s.contas.filter(c => c.id !== id) }));
+  };
+  const apagarInvestimento = (id) => {
+    if (!confirm("Apagar este investimento?")) return;
+    setState(s => ({ ...s, investimentos: s.investimentos.filter(i => i.id !== id) }));
+  };
+  const salvarReservaConfig = (cfg) => setState(s => ({ ...s, reservaConfig: cfg }));
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-[480px] rounded-[24px] p-6" style={{maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-[16px] font-semibold">
-            {initial ? "Editar" : "Adicionar"} {titulo}
-          </h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#FAF9F7] border border-[#E8DDD0] flex items-center justify-center">✕</button>
+    <div>
+      <div className="flex items-center justify-between bg-white border border-[#E8DDD0] rounded-2xl px-4 py-3 mb-6">
+        <button onClick={() => navegar(-1)} className="w-8 h-8 rounded-full bg-white border border-[#E8DDD0] flex items-center justify-center text-[16px]">←</button>
+        <div className="text-center">
+          <p className="text-[18px] font-medium">{KEY_MESES[mes]} {ano}</p>
+          <p className="text-[11px] text-[#8A7F76]">{ehMesAtual ? "mês atual" : "outro mês"}</p>
         </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-[12px] text-[#6B5F57] mb-1">Descrição</label>
-            <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder={ehConta ? "Ex: Nubank" : ehInvestimento ? "Ex: Tesouro Selic" : "Ex: Salário, Aluguel"} autoFocus />
-          </div>
-
-          {ehInvestimento ? (
-            <>
-              <div>
-                <label className="block text-[12px] text-[#6B5F57] mb-1">Conta / Corretora</label>
-                <select className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={contaVinculada} onChange={(e) => setContaVinculada(e.target.value)}>
-                  <option value="">— Sem conta vinculada —</option>
-                  {(contas || []).map((c) => <option key={c.id} value={c.id}>{c.descricao}</option>)}
-                </select>
-                {!contaVinculada && (
-                  <input className="w-full mt-2 bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={banco} onChange={(e) => setBanco(e.target.value)} placeholder="Ou digite o nome do banco" />
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Valor aplicado</label>
-                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={valorAplicado} onChange={(e) => setValorAplicado(e.target.value)} placeholder="10.000" inputMode="decimal" />
-                </div>
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Valor atual</label>
-                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={valorAtual} onChange={(e) => setValorAtual(e.target.value)} placeholder="10.500" inputMode="decimal" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[12px] text-[#6B5F57] mb-2">Tipo de taxa</label>
-                <div className="flex gap-1 p-1 bg-[#FAF9F7] border border-[#E8DDD0] rounded-full">
-                  {["mensal","anual","cdi","selic"].map((t) => (
-                    <button key={t} onClick={() => setTipoTaxa(t)}
-                      className={`flex-1 py-2 rounded-full text-[12px] font-medium ${tipoTaxa === t ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`}>
-                      {t === "mensal" ? "% mês" : t === "anual" ? "% ano" : t === "cdi" ? "% CDI" : "% Selic"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Taxa</label>
-                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={taxa} onChange={(e) => setTaxa(e.target.value)} placeholder="100" inputMode="decimal" />
-                </div>
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Liquidez</label>
-                  <select className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={liquidez} onChange={(e) => setLiquidez(e.target.value)}>
-                    <option value="D0">D0 — diária</option>
-                    <option value="D1">D1 — 1 dia útil</option>
-                    <option value="D30">D30 — 30 dias</option>
-                    <option value="VENCIMENTO">No vencimento</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[12px] text-[#6B5F57] mb-1">Aporte mensal fixo (opcional)</label>
-                <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={aporteMensal} onChange={(e) => setAporteMensal(e.target.value)} placeholder="500" inputMode="decimal" />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Data de início</label>
-                  <input type="month" className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Data de fim</label>
-                  <input type="month" className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={dataFim} onChange={(e) => setDataFim(e.target.value)} />
-                </div>
-              </div>
-
-              {contaVinculada && (
-                <label className="flex items-center gap-2 text-[13px] cursor-pointer">
-                  <input type="checkbox" checked={saiuDaConta} onChange={(e) => setSaiuDaConta(e.target.checked)} />
-                  Esse valor saiu do saldo da conta
-                </label>
-              )}
-            </>
-          ) : ehConta ? (
-            <div>
-              <label className="block text-[12px] text-[#6B5F57] mb-1">Saldo atual</label>
-              <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={bruto} onChange={(e) => setBruto(e.target.value)} placeholder="0" inputMode="decimal" />
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Valor bruto</label>
-                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={bruto} onChange={(e) => setBruto(e.target.value)} placeholder="7.721" inputMode="decimal" />
-                </div>
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Líquido (opcional)</label>
-                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={liquido} onChange={(e) => setLiquido(e.target.value)} placeholder="5.700" inputMode="decimal" />
-                </div>
-              </div>
-
-              {(contas || []).length > 0 && (
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Conta (opcional)</label>
-                  <select className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={contaId} onChange={(e) => setContaId(e.target.value)}>
-                    <option value="">— Sem conta vinculada —</option>
-                    {contas.map((c) => <option key={c.id} value={c.id}>{c.descricao}</option>)}
-                  </select>
-                </div>
-              )}
-
-              {tipo === "gasto" && (
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-2">Tipo de gasto</label>
-                  <div className="flex gap-1 p-1 bg-[#FAF9F7] border border-[#E8DDD0] rounded-full">
-                    <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${fixo ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setFixo(true)}>Fixo</button>
-                    <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${!fixo ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setFixo(false)}>Variável</button>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-[12px] text-[#6B5F57] mb-2">Recorrência</label>
-                <div className="flex gap-1 p-1 bg-[#FAF9F7] border border-[#E8DDD0] rounded-full">
-                  <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${rec === "pontual" ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setRec("pontual")}>Só este mês</button>
-                  <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${rec === "mensal" ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setRec("mensal")}>Todo mês</button>
-                  <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${rec === "anual" ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setRec("anual")}>Todo ano</button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[12px] text-[#6B5F57] mb-1">{rec === "pontual" ? "Mês" : "Começa em"}</label>
-                <input type="month" className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={mesInicio} onChange={(e) => setMesInicio(e.target.value)} />
-              </div>
-
-              {rec !== "pontual" && (
-                <div>
-                  <label className="flex items-center gap-2 text-[13px] cursor-pointer">
-                    <input type="checkbox" checked={temFim} onChange={(e) => setTemFim(e.target.checked)} />
-                    Tem data pra terminar?
-                  </label>
-                  {temFim && (
-                    <input type="month" className="w-full mt-2 bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={mesFim} onChange={(e) => setMesFim(e.target.value)} />
-                  )}
-                </div>
-              )}
-            </>
-          )}
-
-          <button onClick={salvar} disabled={!podeSalvar}
-            className="w-full py-3.5 rounded-full bg-[#111] text-white text-[14px] font-medium disabled:opacity-30">
-            {initial ? "Salvar alterações" : "Adicionar"}
-          </button>
-        </div>
+        <button onClick={() => navegar(1)} className="w-8 h-8 rounded-full bg-white border border-[#E8DDD0] flex items-center justify-center text-[16px]">→</button>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <CardPainelLista
+          titulo="Renda do mês"
+          items={rendas}
+          cor="#2f6b36"
+          sinal="+"
+          contas={contas}
+          onAdd={() => setModal({ tipo: "renda", initial: null })}
+          onEdit={(it) => setModal({ tipo: "renda", initial: it })}
+          onDelete={apagarItem}
+        />
+        <CardPainelLista
+          titulo="Gastos do mês"
+          items={gastos}
+          cor="#b8442f"
+          sinal="-"
+          contas={contas}
+          onAdd={() => setModal({ tipo: "gasto", initial: null })}
+          onEdit={(it) => setModal({ tipo: "gasto", initial: it })}
+          onDelete={apagarItem}
+        />
+        <CardPainelContas
+          contas={contas}
+          items={items}
+          investimentos={investimentos}
+          onAdd={() => setModal({ tipo: "conta", initial: null })}
+          onEdit={(c) => setModal({ tipo: "conta", initial: c })}
+          onDelete={apagarConta}
+        />
+        <CardPainelInvestimentos
+          investimentos={investimentos}
+          onAdd={() => setModal({ tipo: "investimento", initial: null })}
+          onEdit={(inv) => setModal({ tipo: "investimento", initial: inv })}
+          onDelete={apagarInvestimento}
+        />
+        <CardPainelReserva
+          investimentos={investimentos}
+          gastosMes={gastos}
+          config={reservaConfig || { tipo: "meses", valor: 6 }}
+          onEditMeta={() => setReservaModal(true)}
+        />
+        <CardPainelResumo rendas={rendas} gastos={gastos} />
+      </div>
+
+      {modal && (
+        <ModalPainelItem
+          tipo={modal.tipo}
+          initial={modal.initial}
+          mesAtual={mesAtual}
+          contas={contas}
+          onClose={() => setModal(null)}
+          onSave={salvarItem}
+        />
+      )}
+      {reservaModal && (
+        <ModalPainelReserva
+          config={reservaConfig || { tipo: "meses", valor: 6 }}
+          onClose={() => setReservaModal(false)}
+          onSave={salvarReservaConfig}
+        />
+      )}
     </div>
   );
 }
 
-/* Card genérico de lista (Renda, Gastos) */
-function CardLista({ titulo, items, onAdd, onEdit, onDelete, cor, sinal, contas }) {
+function CardPainelLista({ titulo, items, cor, sinal, contas, onAdd, onEdit, onDelete }) {
   const [filtroAberto, setFiltroAberto] = useState(false);
   const [filtroConta, setFiltroConta] = useState("todas");
   const [gruposAbertos, setGruposAbertos] = useState({});
@@ -1951,11 +2248,9 @@ function CardLista({ titulo, items, onAdd, onEdit, onDelete, cor, sinal, contas 
       <div className="flex items-start justify-between mb-4">
         <div>
           <p className="text-[11px] font-semibold text-[#6b6b6b] uppercase" style={{letterSpacing:"0.12em"}}>{titulo}</p>
-          <p className="text-[22px] font-light mt-1" style={{color: cor || "#0a0a0a"}}>{brl(totalLiquido)}</p>
+          <p className="text-[22px] font-light mt-1" style={{color: cor}}>{brl(totalLiquido)}</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={onAdd} className="w-9 h-9 rounded-full bg-[#111] text-white flex items-center justify-center text-[20px]">+</button>
-        </div>
+        <button onClick={onAdd} className="w-9 h-9 rounded-full bg-[#111] text-white flex items-center justify-center text-[20px]">+</button>
       </div>
 
       {contas && contas.length > 0 && items.length > 0 && (
@@ -2011,7 +2306,7 @@ function CardLista({ titulo, items, onAdd, onEdit, onDelete, cor, sinal, contas 
                         <span className="text-[10px] font-semibold text-[#6b6b6b] uppercase" style={{letterSpacing:"0.1em"}}>{grupo.label}</span>
                         <span className="text-[10px] text-[#6b6b6b]">· {grupo.items.length}</span>
                       </div>
-                      <span className="text-[11px] font-medium" style={{color: cor || "#0a0a0a", opacity:0.7}}>
+                      <span className="text-[11px] font-medium" style={{color: cor, opacity:0.7}}>
                         {sinal === "-" ? "−" : ""}{brl(totalGrupo)}
                       </span>
                     </button>
@@ -2024,7 +2319,7 @@ function CardLista({ titulo, items, onAdd, onEdit, onDelete, cor, sinal, contas 
                         {it.fixo === true && <span className="text-[10px] text-[#6b6b6b] font-medium"> · F</span>}
                       </p>
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                        <span className="text-[14px] font-medium" style={{color: cor || "#0a0a0a"}}>
+                        <span className="text-[14px] font-medium" style={{color: cor}}>
                           {sinal === "-" ? "−" : ""}{brl(it.valorLiquidoCents)}
                         </span>
                         <button onClick={() => onEdit(it)} className="w-7 h-7 rounded-full text-[13px] text-[#6b6b6b]">✎</button>
@@ -2042,8 +2337,7 @@ function CardLista({ titulo, items, onAdd, onEdit, onDelete, cor, sinal, contas 
   );
 }
 
-/* Card Contas */
-function CardContas({ contas, items, investimentos, onAdd, onEdit, onDelete }) {
+function CardPainelContas({ contas, items, investimentos, onAdd, onEdit, onDelete }) {
   const [contasAbertas, setContasAbertas] = useState({});
   const totalEmConta = contas.reduce((s,c) => s + calcularSaldoConta(c, items || [], investimentos || []), 0);
   const totalInvestido = contas.reduce((s,c) => s + calcularInvestidoConta(c, investimentos || []), 0);
@@ -2105,8 +2399,7 @@ function CardContas({ contas, items, investimentos, onAdd, onEdit, onDelete }) {
   );
 }
 
-/* Card Investimentos */
-function CardInvestimentos({ investimentos, onAdd, onEdit, onDelete }) {
+function CardPainelInvestimentos({ investimentos, onAdd, onEdit, onDelete }) {
   const totalAplicado = investimentos.reduce((s,i) => s + (i.valorAplicadoCents || 0), 0);
   const totalAtual = investimentos.reduce((s,i) => s + (i.valorAtualCents || i.valorAplicadoCents || 0), 0);
   const rendimento = totalAtual - totalAplicado;
@@ -2167,8 +2460,7 @@ function CardInvestimentos({ investimentos, onAdd, onEdit, onDelete }) {
   );
 }
 
-/* Card Reserva */
-function CardReserva({ investimentos, gastosMes, config, onEditMeta }) {
+function CardPainelReserva({ investimentos, gastosMes, config, onEditMeta }) {
   const totalReserva = saldoReserva(investimentos);
   const gastoMensal = gastosMes.reduce((s,i) => s + (i.valorLiquidoCents || 0), 0);
   const alvoCents = config.tipo === "reais" ? (config.valor || 0) : Math.round((config.valor || 6) * gastoMensal);
@@ -2208,8 +2500,7 @@ function CardReserva({ investimentos, gastosMes, config, onEditMeta }) {
   );
 }
 
-/* Resumo do mês */
-function ResumoMes({ rendas, gastos }) {
+function CardPainelResumo({ rendas, gastos }) {
   const totalRenda = rendas.reduce((s,i) => s + i.valorLiquidoCents, 0);
   const totalGasto = gastos.reduce((s,i) => s + i.valorLiquidoCents, 0);
   const sobra = totalRenda - totalGasto;
@@ -2235,8 +2526,228 @@ function ResumoMes({ rendas, gastos }) {
   );
 }
 
-/* Modal da meta de reserva */
-function ModalReserva({ config, onClose, onSave }) {
+function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
+  const ehConta = tipo === "conta";
+  const ehInvestimento = tipo === "investimento";
+
+  const [descricao, setDescricao] = useState(initial?.descricao || "");
+  const [bruto, setBruto] = useState(initial ? ((initial.valorBrutoCents || initial.saldoCents || 0)/100).toString() : "");
+  const [liquido, setLiquido] = useState(
+    initial?.valorLiquidoCents && initial.valorLiquidoCents !== initial.valorBrutoCents
+      ? (initial.valorLiquidoCents/100).toString() : ""
+  );
+  const [rec, setRec] = useState(initial?.recorrencia || "pontual");
+  const [mesInicio, setMesInicio] = useState(initial?.mesInicio || initial?.mes || mesAtual);
+  const [temFim, setTemFim] = useState(!!initial?.mesFim);
+  const [mesFim, setMesFim] = useState(initial?.mesFim || "");
+  const [fixo, setFixo] = useState(initial?.fixo !== undefined ? initial.fixo : true);
+  const [contaId, setContaId] = useState(initial?.contaId || "");
+
+  const [banco, setBanco] = useState(initial?.banco || "");
+  const [valorAplicado, setValorAplicado] = useState(initial?.valorAplicadoCents ? (initial.valorAplicadoCents/100).toString() : "");
+  const [valorAtual, setValorAtual] = useState(initial?.valorAtualCents ? (initial.valorAtualCents/100).toString() : "");
+  const [taxa, setTaxa] = useState(initial?.taxa ? initial.taxa.toString() : "");
+  const [tipoTaxa, setTipoTaxa] = useState(initial?.tipoTaxa || "anual");
+  const [liquidez, setLiquidez] = useState(initial?.liquidez || "D0");
+  const [dataInicio, setDataInicio] = useState(initial?.dataInicio || mesAtual);
+  const [contaVinculada, setContaVinculada] = useState(initial?.contaVinculadaId || "");
+  const [saiuDaConta, setSaiuDaConta] = useState(initial?.saiuDaConta || false);
+  const [dataFim, setDataFim] = useState(initial?.dataFim || "");
+  const [aporteMensal, setAporteMensal] = useState(initial?.aporteMensalCents ? (initial.aporteMensalCents/100).toString() : "");
+
+  const brutoCents = parseMoneyToCents(bruto);
+  const aplicadoCents = parseMoneyToCents(valorAplicado);
+  const atualCents = parseMoneyToCents(valorAtual);
+  const aporteCents = parseMoneyToCents(aporteMensal);
+
+  const podeSalvar = ehInvestimento
+    ? descricao.trim().length > 0 && aplicadoCents > 0
+    : descricao.trim().length > 0 && (brutoCents > 0 || (ehConta && brutoCents >= 0));
+
+  const titulo = { renda: "renda", gasto: "gasto", conta: "conta", investimento: "investimento" }[tipo] || "item";
+
+  const salvar = () => {
+    if (!podeSalvar) return;
+
+    if (ehInvestimento) {
+      onSave({
+        id: initial?.id || `inv-${Date.now()}-${Math.floor(Math.random()*1e6)}`,
+        tipo: "investimento",
+        descricao: descricao.trim(),
+        banco: banco.trim(),
+        contaVinculadaId: contaVinculada || null,
+        saiuDaConta: !!saiuDaConta,
+        valorAplicadoCents: aplicadoCents,
+        valorAtualCents: atualCents || aplicadoCents,
+        taxa: parseFloat(taxa) || 0,
+        tipoTaxa,
+        liquidez,
+        dataInicio,
+        dataFim: dataFim || null,
+        aporteMensalCents: aporteCents,
+        historico: initial?.historico || [],
+      });
+      return;
+    }
+
+    if (ehConta) {
+      onSave({
+        id: initial?.id || `c-${Date.now()}-${Math.floor(Math.random()*1e6)}`,
+        tipo: "conta",
+        descricao: descricao.trim(),
+        saldoCents: brutoCents,
+        isReserva: false,
+      });
+      return;
+    }
+
+    const liqCents = liquido ? parseMoneyToCents(liquido) : brutoCents;
+    const base = {
+      id: initial?.id || `it-${Date.now()}-${Math.floor(Math.random()*1e6)}`,
+      tipo,
+      descricao: descricao.trim(),
+      valorBrutoCents: brutoCents,
+      valorLiquidoCents: liqCents,
+      recorrencia: rec,
+      contaId: contaId || null,
+    };
+    if (tipo === "gasto") base.fixo = fixo;
+    if (rec === "pontual") base.mes = mesInicio;
+    else {
+      base.mesInicio = mesInicio;
+      if (temFim && mesFim) base.mesFim = mesFim;
+    }
+    onSave(base);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-[480px] rounded-[24px] p-6" style={{maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-[16px] font-semibold">{initial ? "Editar" : "Adicionar"} {titulo}</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#FAF9F7] border border-[#E8DDD0] flex items-center justify-center">✕</button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-[12px] text-[#6B5F57] mb-1">Descrição</label>
+            <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={descricao} onChange={(e) => setDescricao(e.target.value)} autoFocus />
+          </div>
+
+          {ehInvestimento ? (
+            <>
+              <div>
+                <label className="block text-[12px] text-[#6B5F57] mb-1">Conta / Corretora</label>
+                <select className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={contaVinculada} onChange={(e) => setContaVinculada(e.target.value)}>
+                  <option value="">— Sem conta vinculada —</option>
+                  {(contas || []).map((c) => <option key={c.id} value={c.id}>{c.descricao}</option>)}
+                </select>
+                {!contaVinculada && <input className="w-full mt-2 bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={banco} onChange={(e) => setBanco(e.target.value)} placeholder="Ou digite o nome do banco" />}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[12px] text-[#6B5F57] mb-1">Valor aplicado</label>
+                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={valorAplicado} onChange={(e) => setValorAplicado(e.target.value)} inputMode="decimal" />
+                </div>
+                <div>
+                  <label className="block text-[12px] text-[#6B5F57] mb-1">Valor atual</label>
+                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={valorAtual} onChange={(e) => setValorAtual(e.target.value)} inputMode="decimal" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[12px] text-[#6B5F57] mb-1">Taxa</label>
+                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={taxa} onChange={(e) => setTaxa(e.target.value)} placeholder="100" inputMode="decimal" />
+                </div>
+                <div>
+                  <label className="block text-[12px] text-[#6B5F57] mb-1">Liquidez</label>
+                  <select className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={liquidez} onChange={(e) => setLiquidez(e.target.value)}>
+                    <option value="D0">D0 — diária</option>
+                    <option value="D1">D1 — 1 dia útil</option>
+                    <option value="D30">D30 — 30 dias</option>
+                    <option value="VENCIMENTO">No vencimento</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[12px] text-[#6B5F57] mb-2">Tipo de taxa</label>
+                <div className="flex gap-1 p-1 bg-[#FAF9F7] border border-[#E8DDD0] rounded-full">
+                  {["mensal","anual","cdi","selic"].map((t) => (
+                    <button key={t} onClick={() => setTipoTaxa(t)}
+                      className={`flex-1 py-2 rounded-full text-[12px] font-medium ${tipoTaxa === t ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`}>
+                      {t === "mensal" ? "% mês" : t === "anual" ? "% ano" : t === "cdi" ? "% CDI" : "% Selic"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {contaVinculada && (
+                <label className="flex items-center gap-2 text-[13px] cursor-pointer">
+                  <input type="checkbox" checked={saiuDaConta} onChange={(e) => setSaiuDaConta(e.target.checked)} />
+                  Esse valor saiu do saldo da conta
+                </label>
+              )}
+            </>
+          ) : ehConta ? (
+            <div>
+              <label className="block text-[12px] text-[#6B5F57] mb-1">Saldo atual</label>
+              <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={bruto} onChange={(e) => setBruto(e.target.value)} inputMode="decimal" />
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[12px] text-[#6B5F57] mb-1">Valor bruto</label>
+                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={bruto} onChange={(e) => setBruto(e.target.value)} inputMode="decimal" />
+                </div>
+                <div>
+                  <label className="block text-[12px] text-[#6B5F57] mb-1">Líquido (opcional)</label>
+                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={liquido} onChange={(e) => setLiquido(e.target.value)} inputMode="decimal" />
+                </div>
+              </div>
+              {(contas || []).length > 0 && (
+                <div>
+                  <label className="block text-[12px] text-[#6B5F57] mb-1">Conta (opcional)</label>
+                  <select className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={contaId} onChange={(e) => setContaId(e.target.value)}>
+                    <option value="">— Sem conta vinculada —</option>
+                    {contas.map((c) => <option key={c.id} value={c.id}>{c.descricao}</option>)}
+                  </select>
+                </div>
+              )}
+              {tipo === "gasto" && (
+                <div>
+                  <label className="block text-[12px] text-[#6B5F57] mb-2">Tipo de gasto</label>
+                  <div className="flex gap-1 p-1 bg-[#FAF9F7] border border-[#E8DDD0] rounded-full">
+                    <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${fixo ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setFixo(true)}>Fixo</button>
+                    <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${!fixo ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setFixo(false)}>Variável</button>
+                  </div>
+                </div>
+              )}
+              <div>
+                <label className="block text-[12px] text-[#6B5F57] mb-2">Recorrência</label>
+                <div className="flex gap-1 p-1 bg-[#FAF9F7] border border-[#E8DDD0] rounded-full">
+                  <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${rec === "pontual" ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setRec("pontual")}>Só este mês</button>
+                  <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${rec === "mensal" ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setRec("mensal")}>Todo mês</button>
+                  <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${rec === "anual" ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setRec("anual")}>Todo ano</button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[12px] text-[#6B5F57] mb-1">{rec === "pontual" ? "Mês" : "Começa em"}</label>
+                <input type="month" className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={mesInicio} onChange={(e) => setMesInicio(e.target.value)} />
+              </div>
+            </>
+          )}
+
+          <button onClick={salvar} disabled={!podeSalvar}
+            className="w-full py-3.5 rounded-full bg-[#111] text-white text-[14px] font-medium disabled:opacity-30">
+            {initial ? "Salvar alterações" : "Adicionar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalPainelReserva({ config, onClose, onSave }) {
   const [tipo, setTipo] = useState(config.tipo || "meses");
   const [valorMeses, setValorMeses] = useState(config.tipo === "meses" ? (config.valor || 6) : 6);
   const [valorReais, setValorReais] = useState(config.tipo === "reais" ? (config.valor/100 || 0) : "");
@@ -2271,189 +2782,63 @@ function ModalReserva({ config, onClose, onSave }) {
   );
 }
 
-/* Painel principal (Dashboard novo) */
-function Dashboard({ state, setState, user }) {
-  const agora = new Date();
-  const [ano, setAno] = useState(agora.getFullYear());
-  const [mes, setMes] = useState(agora.getMonth());
-  const [modal, setModal] = useState(null);
-  const [reservaModal, setReservaModal] = useState(false);
+/* ── Componentes auxiliares do dashboard ───────────────────── */
 
-  const mesAtual = mk(ano, mes);
-  const navegar = (d) => {
-    let m = mes + d, y = ano;
-    if (m < 0) { m = 11; y--; }
-    if (m > 11) { m = 0; y++; }
-    setMes(m); setAno(y);
+/* ── Componentes auxiliares do dashboard ───────────────────── */
+function ScenarioCard({ scenario, plan, state, margin }) {
+  const descriptions = {
+    conservador: { title: "Conservador", action: "Foco total em segurança." },
+    equilibrado: { title: "Equilibrado", action: "Equilíbrio entre hoje e amanhã." },
+    acelerado: { title: "Acelerado", action: "Mais esforço agora, mais liberdade depois." },
   };
-
-  const porTipo = (tipo) => itemsDoMes(state.items.filter(i => i.tipo === tipo), ano, mes);
-  const rendas = porTipo("renda");
-  const gastos = porTipo("gasto");
-
-  const ehMesAtual = ano === agora.getFullYear() && mes === agora.getMonth();
-
-  const salvarItem = (item) => {
-    setState((s) => {
-      if (item.tipo === "conta") {
-        const existe = s.contas.some(c => c.id === item.id);
-        return { ...s, contas: existe ? s.contas.map(c => c.id === item.id ? item : c) : [...s.contas, item] };
-      }
-      if (item.tipo === "investimento") {
-        const existe = s.investimentos.some(i => i.id === item.id);
-        return { ...s, investimentos: existe ? s.investimentos.map(i => i.id === item.id ? item : i) : [...s.investimentos, item] };
-      }
-      const existe = s.items.some(i => i.id === item.id);
-      return { ...s, items: existe ? s.items.map(i => i.id === item.id ? item : i) : [...s.items, item] };
-    });
-    setModal(null);
-  };
-
-  const apagarItem = (id) => {
-    if (!confirm("Apagar este item?")) return;
-    setState(s => ({ ...s, items: s.items.filter(i => i.id !== id) }));
-  };
-  const apagarConta = (id) => {
-    if (!confirm("Apagar esta conta?")) return;
-    setState(s => ({ ...s, contas: s.contas.filter(c => c.id !== id) }));
-  };
-  const apagarInvestimento = (id) => {
-    if (!confirm("Apagar este investimento?")) return;
-    setState(s => ({ ...s, investimentos: s.investimentos.filter(i => i.id !== id) }));
-  };
-  const salvarReservaConfig = (cfg) => setState(s => ({ ...s, reservaConfig: cfg }));
-
-  const exportarDados = () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `date-backup-${new Date().toISOString().slice(0,10)}.json`; a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const importarDados = () => {
-    const input = document.createElement("input");
-    input.type = "file"; input.accept = "application/json,.json";
-    input.onchange = (e) => {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const dados = JSON.parse(ev.target.result);
-          if (!dados || typeof dados !== "object") { alert("Arquivo inválido."); return; }
-          if (!confirm("Isso vai SUBSTITUIR todos os dados atuais pelos do arquivo. Continuar?")) return;
-          setState({
-            items: Array.isArray(dados.items) ? dados.items : [],
-            contas: Array.isArray(dados.contas) ? dados.contas : [],
-            investimentos: Array.isArray(dados.investimentos) ? dados.investimentos : [],
-            reservaConfig: dados.reservaConfig || { tipo: "meses", valor: 6 },
-            completed: true,
-          });
-          alert("Dados importados com sucesso.");
-        } catch (err) { alert("Não foi possível ler o arquivo."); }
-      };
-      reader.readAsText(file);
-    };
-    input.click();
-  };
-
-  const sair = async () => {
-    if (!confirm("Sair da conta?")) return;
-    await signOut();
-  };
-
+  const d = descriptions[scenario];
   return (
-    <div style={{minHeight:"100vh", background:"#F7F5F2", color:"#0a0a0a", padding:24}}>
-      <div style={{maxWidth:1120, margin:"0 auto"}}>
+    <div className="bg-[#FAF9F7] rounded-2xl p-5 border border-[#E8DDD0]/60">
+      <p className="text-[14px] font-medium text-[#111]">{d.title} • {d.action}</p>
+      <ul className="text-[13px] text-[#6B5F57] mt-3 space-y-1.5 leading-[1.5]">
+        <li>Guardar <b>{brl(plan.toSavingsCents)}</b> por mês na reserva.</li>
+        {plan.toDebtCents > 0 && (
+          <li>Destinar <b>{brl(plan.toDebtCents)}</b> para dívidas
+            {plan.debtPayoffMonths && <> — quitação em <b>{plan.debtPayoffMonths} meses</b></>}.</li>
+        )}
+        {plan.toGoalsCents > 0 && <li>Separar <b>{brl(plan.toGoalsCents)}</b> para metas.</li>}
+        {plan.emergencyReachMonths && (
+          <li>Reserva chega a 6 meses em <b>{plan.emergencyReachMonths} meses</b>.</li>
+        )}
+      </ul>
+      <p className="text-[11px] text-[#9C8F85] mt-3">
+        Base: renda {brl(state.rendaMediaCents)} • fixos {brl(Finance.monthlyFixed(state))} • parcelas {brl(Finance.monthlyInstallments(state))} • margem {brl(margin)}
+      </p>
+    </div>
+  );
+}
 
-        <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:24}}>
-          <div style={{display:"flex", alignItems:"center", gap:12}}>
-            <div style={{width:32,height:32,background:"#0a0a0a",color:"#fff",borderRadius:"9999px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:600}}>D</div>
-            <span style={{fontSize:15, fontWeight:600, letterSpacing:"-0.02em"}}>Date</span>
-          </div>
-          <div style={{display:"flex", alignItems:"center", gap:8}}>
-            <button onClick={exportarDados} className="text-[11px] font-medium px-3 py-1.5 rounded-full border border-[#E8DDD0] bg-white">⬇ Exportar</button>
-            <button onClick={importarDados} className="text-[11px] font-medium px-3 py-1.5 rounded-full border border-[#E8DDD0] bg-white">⬆ Importar</button>
-            <button onClick={sair} className="text-[11px] font-medium px-3 py-1.5 rounded-full border border-[#E8DDD0] bg-white">Sair</button>
-          </div>
-        </div>
+function ActionList({ state, margin }) {
+  const [done, setDone] = useState([]);
+  const items = useMemo(() => [
+    { id: "1", text: `Separar ${brl(Math.max(0, Math.round(margin * 0.5)))} para reserva assim que a renda cair` },
+    { id: "2", text: "Negociar ou antecipar parcela do cartão para reduzir juros" },
+    { id: "3", text: "Definir data fixa para revisão financeira toda segunda" },
+    { id: "4", text: "Classificar 3 gastos pendentes desta semana" },
+  ], [margin]);
 
-        <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", background:"#fff", border:"1px solid #E8DDD0", borderRadius:16, padding:"12px 16px", marginBottom:24}}>
-          <button onClick={() => navegar(-1)} className="w-8 h-8 rounded-full bg-white border border-[#E8DDD0] flex items-center justify-center text-[16px]">←</button>
-          <div style={{textAlign:"center"}}>
-            <p style={{fontSize:18, fontWeight:500}}>{KEY_MESES[mes]} {ano}</p>
-            <p style={{fontSize:11, color:"#6b6b6b"}}>{ehMesAtual ? "mês atual" : "outro mês"}</p>
-          </div>
-          <button onClick={() => navegar(1)} className="w-8 h-8 rounded-full bg-white border border-[#E8DDD0] flex items-center justify-center text-[16px]">→</button>
-        </div>
-
-        <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(320px, 1fr))", gap:16}}>
-          <CardLista
-            titulo="Renda do mês"
-            items={rendas}
-            cor="#2f6b36"
-            sinal="+"
-            contas={state.contas}
-            onAdd={() => setModal({ tipo: "renda", initial: null })}
-            onEdit={(it) => setModal({ tipo: "renda", initial: it })}
-            onDelete={apagarItem}
-          />
-          <CardLista
-            titulo="Gastos do mês"
-            items={gastos}
-            cor="#b8442f"
-            sinal="-"
-            contas={state.contas}
-            onAdd={() => setModal({ tipo: "gasto", initial: null })}
-            onEdit={(it) => setModal({ tipo: "gasto", initial: it })}
-            onDelete={apagarItem}
-          />
-          <CardContas
-            contas={state.contas}
-            items={state.items}
-            investimentos={state.investimentos}
-            onAdd={() => setModal({ tipo: "conta", initial: null })}
-            onEdit={(c) => setModal({ tipo: "conta", initial: c })}
-            onDelete={apagarConta}
-          />
-          <CardInvestimentos
-            investimentos={state.investimentos}
-            onAdd={() => setModal({ tipo: "investimento", initial: null })}
-            onEdit={(inv) => setModal({ tipo: "investimento", initial: inv })}
-            onDelete={apagarInvestimento}
-          />
-          <CardReserva
-            investimentos={state.investimentos}
-            gastosMes={gastos}
-            config={state.reservaConfig || { tipo: "meses", valor: 6 }}
-            onEditMeta={() => setReservaModal(true)}
-          />
-          <ResumoMes rendas={rendas} gastos={gastos} />
-        </div>
-
-        <p style={{fontSize:11, color:"#6b6b6b", textAlign:"center", marginTop:24}}>
-          Tudo salvo automaticamente na sua conta.
-        </p>
-      </div>
-
-      {modal && (
-        <ModalItem
-          tipo={modal.tipo}
-          initial={modal.initial}
-          mesAtual={mesAtual}
-          contas={state.contas}
-          onClose={() => setModal(null)}
-          onSave={salvarItem}
-        />
-      )}
-      {reservaModal && (
-        <ModalReserva
-          config={state.reservaConfig || { tipo: "meses", valor: 6 }}
-          onClose={() => setReservaModal(false)}
-          onSave={salvarReservaConfig}
-        />
-      )}
+  const toggle = (id) => setDone((d) => d.includes(id) ? d.filter((x) => x !== id) : [...d, id]);
+  return (
+    <div className="mt-5 space-y-3">
+      {items.map((it) => {
+        const isDone = done.includes(it.id);
+        return (
+          <button key={it.id} onClick={() => toggle(it.id)} className="w-full flex items-start gap-3 text-left group">
+            <span className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition
+              ${isDone ? "bg-[#111] border-[#111] text-white" : "border-[#E8DDD0] group-hover:border-[#111]"}`}>
+              {isDone && <I.Check size={12} />}
+            </span>
+            <span className={`text-[13.5px] leading-[1.5] ${isDone ? "text-[#9C8F85] line-through" : "text-[#2B211C]"}`}>
+              {it.text}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -2476,12 +2861,12 @@ function App() {
       if (currentUser) {
         setUser(currentUser);
         const saved = await loadFromSupabase(currentUser.id);
-        if (saved) {
+        if (saved && saved.completed) {
           setState(saved);
+          setScreen("dashboard");
         } else {
-          setState(EMPTY_STATE);
+          setScreen("onboarding");
         }
-        setScreen("dashboard");
       } else {
         setScreen("login");
       }

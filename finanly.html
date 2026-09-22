@@ -3336,10 +3336,7 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
 
   const [descricao, setDescricao] = useState(initial?.descricao || "");
   const [bruto, setBruto] = useState(initial ? ((initial.valorBrutoCents || initial.saldoCents || 0)/100).toString() : "");
-  const [liquido, setLiquido] = useState(
-    initial?.valorLiquidoCents && initial.valorLiquidoCents !== initial.valorBrutoCents
-      ? (initial.valorLiquidoCents/100).toString() : ""
-  );
+  const [liquido, setLiquido] = useState(initial?.valorLiquidoCents && initial.valorLiquidoCents !== initial.valorBrutoCents ? (initial.valorLiquidoCents/100).toString() : "");
   const [rec, setRec] = useState(initial?.recorrencia || "pontual");
   const [mesInicio, setMesInicio] = useState(initial?.mesInicio || initial?.mes || mesAtual);
   const [temFim, setTemFim] = useState(!!initial?.mesFim);
@@ -3347,7 +3344,6 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
   const [fixo, setFixo] = useState(initial?.fixo !== undefined ? initial.fixo : true);
   const [contaId, setContaId] = useState(initial?.contaId || "");
   const [ehReserva, setEhReserva] = useState(!!initial?.isReserva);
-
   const [banco, setBanco] = useState(initial?.banco || "");
   const [valorAplicado, setValorAplicado] = useState(initial?.valorAplicadoCents ? (initial.valorAplicadoCents/100).toString() : "");
   const [valorAtual, setValorAtual] = useState(initial?.valorAtualCents ? (initial.valorAtualCents/100).toString() : "");
@@ -3373,106 +3369,121 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
 
   const salvar = () => {
     if (!podeSalvar) return;
-
     if (ehInvestimento) {
       onSave({
         id: initial?.id || `inv-${Date.now()}-${Math.floor(Math.random()*1e6)}`,
-        tipo: "investimento",
-        descricao: descricao.trim(),
-        banco: banco.trim(),
-        contaVinculadaId: contaVinculada || null,
-        saiuDaConta: !!saiuDaConta,
-        valorAplicadoCents: aplicadoCents,
-        valorAtualCents: atualCents || aplicadoCents,
-        taxa: parseFloat(taxa) || 0,
-        tipoTaxa,
-        liquidez,
-        dataInicio,
-        dataFim: dataFim || null,
-        aporteMensalCents: aporteCents,
+        tipo: "investimento", descricao: descricao.trim(), banco: banco.trim(),
+        contaVinculadaId: contaVinculada || null, saiuDaConta: !!saiuDaConta,
+        valorAplicadoCents: aplicadoCents, valorAtualCents: atualCents || aplicadoCents,
+        taxa: parseFloat(taxa) || 0, tipoTaxa, liquidez, dataInicio,
+        dataFim: dataFim || null, aporteMensalCents: aporteCents,
         historico: initial?.historico || [],
       });
       return;
     }
-
     if (ehConta) {
       onSave({
         id: initial?.id || `c-${Date.now()}-${Math.floor(Math.random()*1e6)}`,
-        tipo: "conta",
-        descricao: descricao.trim(),
-        saldoCents: brutoCents,
-        isReserva: ehReserva,
+        tipo: "conta", descricao: descricao.trim(),
+        saldoCents: brutoCents, isReserva: ehReserva,
       });
       return;
     }
-
     const liqCents = liquido ? parseMoneyToCents(liquido) : brutoCents;
     const base = {
       id: initial?.id || `it-${Date.now()}-${Math.floor(Math.random()*1e6)}`,
-      tipo,
-      descricao: descricao.trim(),
-      valorBrutoCents: brutoCents,
-      valorLiquidoCents: liqCents,
-      recorrencia: rec,
-      contaId: contaId || null,
+      tipo, descricao: descricao.trim(),
+      valorBrutoCents: brutoCents, valorLiquidoCents: liqCents,
+      recorrencia: rec, contaId: contaId || null,
     };
     if (tipo === "gasto") base.fixo = fixo;
     if (rec === "pontual") base.mes = mesInicio;
-    else {
-      base.mesInicio = mesInicio;
-      if (temFim && mesFim) base.mesFim = mesFim;
-    }
+    else { base.mesInicio = mesInicio; if (temFim && mesFim) base.mesFim = mesFim; }
     onSave(base);
   };
 
+  const inputStyle = {width:"100%", background:"#FAF9F7", border:"1px solid #E8DDD0", borderRadius:12, padding:"12px 16px", fontSize:14, outline:"none", color:"#111"};
+  const labelStyle = {display:"block", fontSize:12, color:"#6B5F57", marginBottom:4};
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        background: "rgba(0,0,0,0.4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
       <div
-        className="bg-white w-full rounded-[24px] flex flex-col"
-        style={{ maxWidth: 480, maxHeight: "90vh", overflow: "hidden" }}
         onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#fff",
+          width: "100%",
+          maxWidth: 480,
+          height: "85vh",
+          maxHeight: 640,
+          borderRadius: 24,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
       >
-        {/* Cabeçalho fixo */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-[#F2EDE8]">
-          <h3 className="text-[16px] font-semibold">{initial ? "Editar" : "Adicionar"} {titulo}</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#FAF9F7] border border-[#E8DDD0] flex items-center justify-center">✕</button>
+        {/* ── Cabeçalho FIXO ── */}
+        <div style={{
+          flexShrink: 0,
+          padding: "20px 24px",
+          borderBottom: "1px solid #F2EDE8",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          background: "#fff",
+        }}>
+          <h3 style={{fontSize:16, fontWeight:600, margin:0, color:"#111"}}>
+            {initial ? "Editar" : "Adicionar"} {titulo}
+          </h3>
+          <button onClick={onClose} style={{width:32, height:32, borderRadius:"50%", background:"#FAF9F7", border:"1px solid #E8DDD0", cursor:"pointer", fontSize:14, color:"#111"}}>✕</button>
         </div>
 
-        {/* Corpo com rolagem */}
-        <div className="px-6 py-5 space-y-4" style={{ overflowY: "auto", flex: 1 }}>
-          <div>
-            <label className="block text-[12px] text-[#6B5F57] mb-1">Descrição</label>
-            <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={descricao} onChange={(e) => setDescricao(e.target.value)} autoFocus />
+        {/* ── Corpo com ROLAGEM ── */}
+        <div style={{flex:1, overflowY:"auto", padding:24}}>
+          <div style={{marginBottom:16}}>
+            <label style={labelStyle}>Descrição</label>
+            <input style={inputStyle} value={descricao} onChange={(e) => setDescricao(e.target.value)} autoFocus />
           </div>
 
           {ehInvestimento ? (
             <>
-              <div>
-                <label className="block text-[12px] text-[#6B5F57] mb-1">Conta / Corretora</label>
-                <select className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={contaVinculada} onChange={(e) => setContaVinculada(e.target.value)}>
+              <div style={{marginBottom:16}}>
+                <label style={labelStyle}>Conta / Corretora</label>
+                <select style={inputStyle} value={contaVinculada} onChange={(e) => setContaVinculada(e.target.value)}>
                   <option value="">— Sem conta vinculada —</option>
                   {(contas || []).map((c) => <option key={c.id} value={c.id}>{c.descricao}</option>)}
                 </select>
-                {!contaVinculada && <input className="w-full mt-2 bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={banco} onChange={(e) => setBanco(e.target.value)} placeholder="Ou digite o nome do banco" />}
+                {!contaVinculada && <input style={{...inputStyle, marginTop:8}} value={banco} onChange={(e) => setBanco(e.target.value)} placeholder="Ou digite o nome do banco" />}
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16}}>
                 <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Valor aplicado</label>
-                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={valorAplicado} onChange={(e) => setValorAplicado(e.target.value)} inputMode="decimal" />
+                  <label style={labelStyle}>Valor aplicado</label>
+                  <input style={inputStyle} value={valorAplicado} onChange={(e) => setValorAplicado(e.target.value)} inputMode="decimal" />
                 </div>
                 <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Valor atual</label>
-                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={valorAtual} onChange={(e) => setValorAtual(e.target.value)} inputMode="decimal" />
+                  <label style={labelStyle}>Valor atual</label>
+                  <input style={inputStyle} value={valorAtual} onChange={(e) => setValorAtual(e.target.value)} inputMode="decimal" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16}}>
                 <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Taxa</label>
-                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={taxa} onChange={(e) => setTaxa(e.target.value)} placeholder="100" inputMode="decimal" />
+                  <label style={labelStyle}>Taxa</label>
+                  <input style={inputStyle} value={taxa} onChange={(e) => setTaxa(e.target.value)} placeholder="100" inputMode="decimal" />
                 </div>
                 <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Liquidez</label>
-                  <select className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={liquidez} onChange={(e) => setLiquidez(e.target.value)}>
+                  <label style={labelStyle}>Liquidez</label>
+                  <select style={inputStyle} value={liquidez} onChange={(e) => setLiquidez(e.target.value)}>
                     <option value="D0">D0 — diária</option>
                     <option value="D1">D1 — 1 dia útil</option>
                     <option value="D30">D30 — 30 dias</option>
@@ -3480,19 +3491,18 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-[12px] text-[#6B5F57] mb-2">Tipo de taxa</label>
-                <div className="flex gap-1 p-1 bg-[#FAF9F7] border border-[#E8DDD0] rounded-full">
+              <div style={{marginBottom:16}}>
+                <label style={{...labelStyle, marginBottom:8}}>Tipo de taxa</label>
+                <div style={{display:"flex", gap:4, padding:4, background:"#FAF9F7", border:"1px solid #E8DDD0", borderRadius:9999}}>
                   {["mensal","anual","cdi","selic"].map((t) => (
-                    <button key={t} onClick={() => setTipoTaxa(t)}
-                      className={`flex-1 py-2 rounded-full text-[12px] font-medium ${tipoTaxa === t ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`}>
+                    <button key={t} onClick={() => setTipoTaxa(t)} style={{flex:1, padding:"8px 0", borderRadius:9999, fontSize:12, fontWeight:500, border:"none", cursor:"pointer", background: tipoTaxa === t ? "#111" : "transparent", color: tipoTaxa === t ? "#fff" : "#4a4a4a"}}>
                       {t === "mensal" ? "% mês" : t === "anual" ? "% ano" : t === "cdi" ? "% CDI" : "% Selic"}
                     </button>
                   ))}
                 </div>
               </div>
               {contaVinculada && (
-                <label className="flex items-center gap-2 text-[13px] cursor-pointer">
+                <label style={{display:"flex", alignItems:"center", gap:8, fontSize:13, cursor:"pointer"}}>
                   <input type="checkbox" checked={saiuDaConta} onChange={(e) => setSaiuDaConta(e.target.checked)} />
                   Esse valor saiu do saldo da conta
                 </label>
@@ -3500,65 +3510,81 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
             </>
           ) : ehConta ? (
             <div>
-              <label className="block text-[12px] text-[#6B5F57] mb-1">Saldo atual</label>
-              <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={bruto} onChange={(e) => setBruto(e.target.value)} inputMode="decimal" />
-              <label className="flex items-center gap-2 text-[13px] cursor-pointer mt-3">
+              <label style={labelStyle}>Saldo atual</label>
+              <input style={inputStyle} value={bruto} onChange={(e) => setBruto(e.target.value)} inputMode="decimal" />
+              <label style={{display:"flex", alignItems:"center", gap:8, fontSize:13, cursor:"pointer", marginTop:12}}>
                 <input type="checkbox" checked={ehReserva} onChange={(e) => setEhReserva(e.target.checked)} />
                 Esta conta é minha reserva de emergência
               </label>
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16}}>
                 <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Valor bruto</label>
-                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={bruto} onChange={(e) => setBruto(e.target.value)} inputMode="decimal" />
+                  <label style={labelStyle}>Valor bruto</label>
+                  <input style={inputStyle} value={bruto} onChange={(e) => setBruto(e.target.value)} inputMode="decimal" />
                 </div>
                 <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Líquido (opcional)</label>
-                  <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={liquido} onChange={(e) => setLiquido(e.target.value)} inputMode="decimal" />
+                  <label style={labelStyle}>Líquido (opcional)</label>
+                  <input style={inputStyle} value={liquido} onChange={(e) => setLiquido(e.target.value)} inputMode="decimal" />
                 </div>
               </div>
               {(contas || []).length > 0 && (
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-1">Conta (opcional)</label>
-                  <select className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={contaId} onChange={(e) => setContaId(e.target.value)}>
+                <div style={{marginBottom:16}}>
+                  <label style={labelStyle}>Conta (opcional)</label>
+                  <select style={inputStyle} value={contaId} onChange={(e) => setContaId(e.target.value)}>
                     <option value="">— Sem conta vinculada —</option>
                     {contas.map((c) => <option key={c.id} value={c.id}>{c.descricao}</option>)}
                   </select>
                 </div>
               )}
               {tipo === "gasto" && (
-                <div>
-                  <label className="block text-[12px] text-[#6B5F57] mb-2">Tipo de gasto</label>
-                  <div className="flex gap-1 p-1 bg-[#FAF9F7] border border-[#E8DDD0] rounded-full">
-                    <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${fixo ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setFixo(true)}>Fixo</button>
-                    <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${!fixo ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setFixo(false)}>Variável</button>
+                <div style={{marginBottom:16}}>
+                  <label style={{...labelStyle, marginBottom:8}}>Tipo de gasto</label>
+                  <div style={{display:"flex", gap:4, padding:4, background:"#FAF9F7", border:"1px solid #E8DDD0", borderRadius:9999}}>
+                    <button onClick={() => setFixo(true)} style={{flex:1, padding:"8px 0", borderRadius:9999, fontSize:12, fontWeight:500, border:"none", cursor:"pointer", background: fixo ? "#111" : "transparent", color: fixo ? "#fff" : "#4a4a4a"}}>Fixo</button>
+                    <button onClick={() => setFixo(false)} style={{flex:1, padding:"8px 0", borderRadius:9999, fontSize:12, fontWeight:500, border:"none", cursor:"pointer", background: !fixo ? "#111" : "transparent", color: !fixo ? "#fff" : "#4a4a4a"}}>Variável</button>
                   </div>
                 </div>
               )}
-              <div>
-                <label className="block text-[12px] text-[#6B5F57] mb-2">Recorrência</label>
-                <div className="flex gap-1 p-1 bg-[#FAF9F7] border border-[#E8DDD0] rounded-full">
-                  <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${rec === "pontual" ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setRec("pontual")}>Só este mês</button>
-                  <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${rec === "mensal" ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setRec("mensal")}>Todo mês</button>
-                  <button className={`flex-1 py-2 rounded-full text-[12px] font-medium ${rec === "anual" ? "bg-[#111] text-white" : "text-[#4a4a4a]"}`} onClick={() => setRec("anual")}>Todo ano</button>
+              <div style={{marginBottom:16}}>
+                <label style={{...labelStyle, marginBottom:8}}>Recorrência</label>
+                <div style={{display:"flex", gap:4, padding:4, background:"#FAF9F7", border:"1px solid #E8DDD0", borderRadius:9999}}>
+                  <button onClick={() => setRec("pontual")} style={{flex:1, padding:"8px 0", borderRadius:9999, fontSize:12, fontWeight:500, border:"none", cursor:"pointer", background: rec === "pontual" ? "#111" : "transparent", color: rec === "pontual" ? "#fff" : "#4a4a4a"}}>Só este mês</button>
+                  <button onClick={() => setRec("mensal")} style={{flex:1, padding:"8px 0", borderRadius:9999, fontSize:12, fontWeight:500, border:"none", cursor:"pointer", background: rec === "mensal" ? "#111" : "transparent", color: rec === "mensal" ? "#fff" : "#4a4a4a"}}>Todo mês</button>
+                  <button onClick={() => setRec("anual")} style={{flex:1, padding:"8px 0", borderRadius:9999, fontSize:12, fontWeight:500, border:"none", cursor:"pointer", background: rec === "anual" ? "#111" : "transparent", color: rec === "anual" ? "#fff" : "#4a4a4a"}}>Todo ano</button>
                 </div>
               </div>
               <div>
-                <label className="block text-[12px] text-[#6B5F57] mb-1">{rec === "pontual" ? "Mês" : "Começa em"}</label>
-                <input type="month" className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={mesInicio} onChange={(e) => setMesInicio(e.target.value)} />
+                <label style={labelStyle}>{rec === "pontual" ? "Mês" : "Começa em"}</label>
+                <input type="month" style={inputStyle} value={mesInicio} onChange={(e) => setMesInicio(e.target.value)} />
               </div>
             </>
           )}
         </div>
 
-        {/* Rodapé fixo — SEMPRE visível */}
-        <div className="px-6 py-4 border-t border-[#F2EDE8] bg-white">
+        {/* ── Rodapé FIXO com botão SEMPRE visível ── */}
+        <div style={{
+          flexShrink: 0,
+          padding: "16px 24px",
+          borderTop: "1px solid #F2EDE8",
+          background: "#fff",
+        }}>
           <button
             onClick={salvar}
             disabled={!podeSalvar}
-            className="w-full py-3.5 rounded-full bg-[#111] text-white text-[14px] font-medium disabled:opacity-30"
+            style={{
+              width: "100%",
+              padding: "14px 0",
+              borderRadius: 9999,
+              background: podeSalvar ? "#111" : "#ccc",
+              color: "#fff",
+              fontSize: 14,
+              fontWeight: 500,
+              border: "none",
+              cursor: podeSalvar ? "pointer" : "not-allowed",
+              opacity: podeSalvar ? 1 : 0.5,
+            }}
           >
             {initial ? "Salvar alterações" : "Adicionar"}
           </button>
@@ -3567,8 +3593,6 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
     </div>
   );
 }
-
-
 /* ── Modal de meta da reserva ──────────────────────────────── */
 function ModalPainelReserva({ config, onClose, onSave }) {
   const [tipo, setTipo] = useState(config.tipo || "meses");

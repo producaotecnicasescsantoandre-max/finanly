@@ -708,6 +708,19 @@ async function loadFromSupabase(userId) {
       : { tipo: "meses", valor: 6 };
 
     return {
+      nome: "",
+      familia: "",
+      cidade: "",
+      fonteRenda: "",
+      rendaMediaCents: 0,
+      variacaoRenda: "",
+      gastosFixosCents: 0,
+      gastosFixosList: [],
+      dividas: [],
+      reservaCents: 0,
+      metasRaw: "",
+      metas: [],
+      lancamentos: [],
       items,
       contas,
       investimentos,

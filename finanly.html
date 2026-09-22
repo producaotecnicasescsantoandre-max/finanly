@@ -733,6 +733,145 @@ async function loadFromSupabase(userId) {
   }
 }
 
+/* ── ONBOARDING COM IA DE VERDADE ─────────────────────────── */
+
+function buildOnboardingTools() {
+  return [
+    {
+      type: "function",
+      function: {
+        name: "salvar_perfil",
+        description: "Salva o nome, cidade ou situação familiar do usuário. Use quando o usuário informar esses dados.",
+        parameters: {
+          type: "object",
+          properties: {
+            nome: { type: "string", description: "Primeiro nome do usuário" },
+            cidade: { type: "string", description: "Cidade onde mora" },
+            familia: { type: "string", description: "Com quem mora (sozinho, companheiro, família...)" },
+          },
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "salvar_renda",
+        description: "Salva a renda mensal do usuário. Valor em reais (não centavos).",
+        parameters: {
+          type: "object",
+          properties: {
+            valor: { type: "number", description: "Renda mensal em reais. Ex: 8500" },
+            fonte: { type: "string", description: "De onde vem a renda. Ex: salário CLT, freelas" },
+            variacao: { type: "string", description: "Se a renda varia: estável, 20%, 30-40%, 50%+" },
+          },
+          required: ["valor"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "salvar_gasto_fixo",
+        description: "Salva UM gasto fixo mensal. Chame uma vez para cada gasto que o usuário informar. Valor em reais.",
+        parameters: {
+          type: "object",
+          properties: {
+            descricao: { type: "string", description: "Nome do gasto. Ex: Aluguel, Internet" },
+            valor: { type: "number", description: "Valor mensal em reais. Ex: 1800" },
+          },
+          required: ["descricao", "valor"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "salvar_divida",
+        description: "Salva UMA dívida do usuário. Chame uma vez para cada dívida. Valores em reais.",
+        parameters: {
+          type: "object",
+          properties: {
+            descricao: { type: "string", description: "Nome. Ex: Cartão Nubank" },
+            total: { type: "number", description: "Valor total em reais. Ex: 3400" },
+            parcela: { type: "number", description: "Valor da parcela mensal em reais, se houver. Ex: 1100" },
+          },
+          required: ["descricao", "total"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "salvar_reserva",
+        description: "Salva o valor que o usuário tem guardado de reserva de emergência. Valor em reais.",
+        parameters: {
+          type: "object",
+          properties: {
+            valor: { type: "number", description: "Valor guardado em reais. Ex: 7600" },
+          },
+          required: ["valor"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "salvar_meta",
+        description: "Salva UMA meta financeira do usuário. Chame uma vez para cada meta. Valores em reais.",
+        parameters: {
+          type: "object",
+          properties: {
+            titulo: { type: "string", description: "Título da meta. Ex: Viagem para Europa" },
+            valor: { type: "number", description: "Valor alvo em reais. Ex: 12000" },
+            meses: { type: "number", description: "Prazo em meses. Ex: 10" },
+          },
+          required: ["titulo", "valor", "meses"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "finalizar_onboarding",
+        description: "Chame SÓ quando você já tiver coletado: nome, renda mensal, gastos fixos principais e reserva. Depois disso, o app leva o usuário pro painel.",
+        parameters: {
+          type: "object",
+          properties: {
+            mensagem_final: { type: "string", description: "Mensagem curta de despedida para o usuário" },
+          },
+          required: ["mensagem_final"],
+        },
+      },
+    },
+  ];
+}
+
+function buildOnboardingSystemPrompt() {
+  return `Você é o Claro, um consultor financeiro pessoal, empático, sem julgamento. Fala português do Brasil.
+
+Você acabou de conhecer o usuário e precisa entender a realidade financeira dele antes de sugerir qualquer coisa.
+
+REGRAS:
+1. Faça UMA pergunta por vez. Nunca várias de uma vez.
+2. Seja curto e humano. Nada de tom corporativo ou jargão financeiro.
+3. Conforme o usuário responde, CHAME A FERRAMENTA correspondente pra salvar o dado.
+4. Confirme dados sensíveis: "Entendi que sua renda é R$ 8.500. Está certo?"
+5. Quando tiver nome, renda mensal, gastos fixos principais e reserva, chame a ferramenta finalizar_onboarding.
+6. Nunca invente valores. Se não souber, pergunte.
+
+O QUE VOCÊ PRECISA DESCOBRIR (nesta ordem aproximada):
+- Nome
+- Com quem mora e onde
+- De onde vem a renda e quanto (média mensal)
+- Se a renda varia
+- Gastos fixos mensais (aluguel, internet, etc.)
+- Dívidas (cartão, financiamento)
+- Reserva de emergência
+- Metas para os próximos 12 meses
+
+Comece cumprimentando e perguntando o nome.`;
+}
+
 
 /* ─────────────────────────────────────────────────────────────
    ROTEIRO DE ONBOARDING
@@ -1047,78 +1186,220 @@ function LoginScreen() {
 }
 
 function Onboarding({ onComplete, onSkip }) {
-  const script = useMemo(buildScript, []);
-  const [step, setStep] = useState(0);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
-  const [state, setState] = useState(EMPTY_STATE);
-  const [confirmation, setConfirmation] = useState(null);
+  const [error, setError] = useState(null);
+  const [onboardingState, setOnboardingState] = useState({
+    nome: "", familia: "", cidade: "",
+    fonteRenda: "", rendaMediaCents: 0, variacaoRenda: "",
+    gastosFixosCents: 0, gastosFixosList: [],
+    dividas: [], reservaCents: 0,
+    metasRaw: "", metas: [],
+    items: [], contas: [], investimentos: [],
+    reservaConfig: { tipo: "meses", valor: 6 },
+    completed: false,
+  });
   const endRef = useRef(null);
   const inputRef = useRef(null);
+  const iniciado = useRef(false);
 
   useEffect(() => {
-    setTyping(true);
-    const t = setTimeout(() => {
-      setMessages([{ role: "ai", text: script[0].question(EMPTY_STATE) }]);
-      setTyping(false);
-    }, 500);
-    return () => clearTimeout(t);
+    if (iniciado.current) return;
+    iniciado.current = true;
+    iniciar();
   }, []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
     inputRef.current?.focus();
-  }, [messages, typing, confirmation]);
+  }, [messages, typing]);
 
-  const submit = (value) => {
-    const text = (value ?? input).trim();
-    if (!text) return;
-    setMessages((m) => [...m, { role: "user", text }]);
-    setInput("");
+  const iniciar = async () => {
+    setTyping(true);
+    try {
+      const tools = buildOnboardingTools();
+      const reply = await callOpenAI("server", [
+        { role: "system", content: buildOnboardingSystemPrompt() },
+        { role: "user", content: "(O usuário acabou de entrar. Comece a conversa.)" },
+      ], tools);
+      await processarResposta(reply);
+    } catch (e) {
+      setError(e.message);
+      setMessages([{ role: "ai", text: `Não consegui iniciar: ${e.message}` }]);
+    } finally {
+      setTyping(false);
+    }
+  };
 
-    const current = script[step];
-    const patch = current.parser ? current.parser(text, state) : {};
-    const nextState = { ...state, ...patch };
-    setState(nextState);
+  const processarResposta = async (assistantMsg) => {
+    const toolCalls = assistantMsg.tool_calls || [];
 
-    // Confirmação adaptativa: renda + fixos já definidos
-    if (nextState.rendaMediaCents > 0 && nextState.gastosFixosCents > 0 && step >= 6 && !confirmation) {
-      setConfirmation({
-        text: `Entendi que sua renda média é de ${brl(nextState.rendaMediaCents)} e seus compromissos fixos somam cerca de ${brl(nextState.gastosFixosCents)}. Está correto?`,
-      });
+    if (toolCalls.length > 0) {
+      let estadoAtualizado = { ...onboardingState };
+      let finalizou = false;
+      let msgFinal = "";
+
+      for (const call of toolCalls) {
+        const { name, arguments: argsStr } = call.function;
+        let args = {};
+        try { args = JSON.parse(argsStr); } catch {}
+
+        estadoAtualizado = aplicarFerramenta(name, args, estadoAtualizado);
+
+        if (name === "finalizar_onboarding") {
+          finalizou = true;
+          msgFinal = args.mensagem_final || "Tudo pronto. Vou montar seu painel.";
+        }
+      }
+
+      setOnboardingState(estadoAtualizado);
+
+      if (finalizou) {
+        setMessages((m) => [...m, { role: "ai", text: msgFinal }]);
+        setTimeout(() => {
+          onComplete({ ...estadoAtualizado, completed: true });
+        }, 1800);
+        return;
+      }
+
+      const tools = buildOnboardingTools();
+      const historico = messages.map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }));
+      const segundaChamada = await callOpenAI("server", [
+        { role: "system", content: buildOnboardingSystemPrompt() },
+        ...historico,
+        assistantMsg,
+        ...toolCalls.map((call) => ({
+          role: "tool",
+          tool_call_id: call.id,
+          content: JSON.stringify({ ok: true }),
+        })),
+      ], tools);
+
+      if (segundaChamada.content) {
+        setMessages((m) => [...m, { role: "ai", text: segundaChamada.content }]);
+      }
+    } else if (assistantMsg.content) {
+      setMessages((m) => [...m, { role: "ai", text: assistantMsg.content }]);
+    }
+  };
+
+  const aplicarFerramenta = (nome, args, estado) => {
+    const novo = { ...estado };
+
+    if (nome === "salvar_perfil") {
+      if (args.nome) novo.nome = args.nome;
+      if (args.cidade) novo.cidade = args.cidade;
+      if (args.familia) novo.familia = args.familia;
     }
 
+    if (nome === "salvar_renda") {
+      novo.rendaMediaCents = Math.round(args.valor * 100);
+      if (args.fonte) novo.fonteRenda = args.fonte;
+      if (args.variacao) novo.variacaoRenda = args.variacao;
+
+      // Adiciona também como item do painel novo
+      novo.items = [
+        ...(novo.items || []),
+        {
+          id: `it-${Date.now()}-r`,
+          tipo: "renda",
+          descricao: args.fonte || "Renda principal",
+          valorBrutoCents: novo.rendaMediaCents,
+          valorLiquidoCents: novo.rendaMediaCents,
+          recorrencia: "mensal",
+          mesInicio: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`,
+          contaId: null,
+        },
+      ];
+    }
+
+    if (nome === "salvar_gasto_fixo") {
+      const cents = Math.round(args.valor * 100);
+      const item = {
+        id: `it-${Date.now()}-g-${Math.random().toString(36).slice(2, 5)}`,
+        name: args.descricao,
+        valueCents: cents,
+      };
+      novo.gastosFixosList = [...(novo.gastosFixosList || []), item];
+      novo.gastosFixosCents = (novo.gastosFixosCents || 0) + cents;
+
+      novo.items = [
+        ...(novo.items || []),
+        {
+          id: item.id,
+          tipo: "gasto",
+          descricao: args.descricao,
+          valorBrutoCents: cents,
+          valorLiquidoCents: cents,
+          recorrencia: "mensal",
+          mesInicio: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`,
+          fixo: true,
+          contaId: null,
+        },
+      ];
+    }
+
+    if (nome === "salvar_divida") {
+      const totalCents = Math.round(args.total * 100);
+      const parcelaCents = args.parcela ? Math.round(args.parcela * 100) : Math.round(totalCents / 6);
+      novo.dividas = [
+        ...(novo.dividas || []),
+        { id: `d-${Date.now()}`, name: args.descricao, totalCents, parcelaCents },
+      ];
+    }
+
+    if (nome === "salvar_reserva") {
+      novo.reservaCents = Math.round(args.valor * 100);
+    }
+
+    if (nome === "salvar_meta") {
+      novo.metas = [
+        ...(novo.metas || []),
+        {
+          id: `m-${Date.now()}`,
+          title: args.titulo,
+          valueCents: Math.round(args.valor * 100),
+          months: args.meses,
+          priority: "alta",
+          progress: 0,
+        },
+      ];
+    }
+
+    return novo;
+  };
+
+  const enviar = async (texto) => {
+    const t = (texto ?? input).trim();
+    if (!t) return;
+
+    setMessages((m) => [...m, { role: "user", text: t }]);
+    setInput("");
     setTyping(true);
-    setTimeout(() => {
+    setError(null);
+
+    try {
+      const tools = buildOnboardingTools();
+      const historico = messages.map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }));
+      const resposta = await callOpenAI("server", [
+        { role: "system", content: buildOnboardingSystemPrompt() },
+        ...historico,
+        { role: "user", content: t },
+      ], tools);
+      await processarResposta(resposta);
+    } catch (e) {
+      setError(e.message);
+      setMessages((m) => [...m, { role: "ai", text: `Deu erro: ${e.message}` }]);
+    } finally {
       setTyping(false);
-      if (step < script.length - 1) {
-        const nextStep = step + 1;
-        setStep(nextStep);
-        setMessages((m) => [...m, { role: "ai", text: script[nextStep].question(nextState) }]);
-      } else {
-        setMessages((m) => [...m, {
-          role: "ai",
-          text: `Perfeito, ${nextState.nome || "tudo certo"}. Já tenho o que preciso para desenhar seu primeiro plano.\n\nVou organizar tudo e te mostrar quanto sobra, quanto sua reserva cobre e por onde começar.`,
-        }]);
-      }
-    }, 850);
+    }
   };
 
-  const finish = () => {
-    onComplete({ ...state, completed: true });
-  };
-
-  const progress = ((step + 1) / script.length) * 100;
-  const isLast = step === script.length - 1;
-  const readyToFinish = isLast && !typing && messages.length >= script.length * 2 - 1;
+  const sugestoes = ["Bruno", "Moro sozinho em SP", "Ganho uns 8 mil por mês", "Tenho 7 mil guardados"];
 
   return (
     <div className="min-h-screen bg-[#FAF9F7] flex flex-col">
-      <div className="w-full h-[2px] bg-[#E8DDD0]/60 sticky top-0 z-20">
-        <div className="h-full bg-[#111] transition-all duration-700 ease-out" style={{ width: `${progress}%` }} />
-      </div>
-
       <header className="w-full max-w-[760px] mx-auto px-6 md:px-8 pt-8 pb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Avatar />
@@ -1129,14 +1410,14 @@ function Onboarding({ onComplete, onSkip }) {
         </div>
         <button onClick={onSkip}
           className="text-[12px] font-medium text-[#8A7F76] hover:text-[#111] flex items-center gap-1.5 border border-[#E8DDD0] rounded-full px-3 py-1.5 bg-white/60 transition">
-          <I.Eye size={14} /> Ver demonstração
+          <I.Eye size={14} /> Pular
         </button>
       </header>
 
       <main className="flex-1 w-full max-w-[760px] mx-auto px-6 md:px-8 pb-32">
         <div className="pt-6 pb-4">
           <p className="text-[11px] tracking-[0.14em] uppercase text-[#9C8F85] font-medium">
-            Diagnóstico • {step + 1} de {script.length}
+            Conversa com o consultor
           </p>
         </div>
 
@@ -1158,29 +1439,6 @@ function Onboarding({ onComplete, onSkip }) {
             </div>
           ))}
 
-          {confirmation && (
-            <div className="flex justify-start animate-fade-in">
-              <div className="flex gap-3 max-w-[88%]">
-                <Avatar color="#7A9E7E">
-                  <I.Check size={14} />
-                </Avatar>
-                <div className="bg-white border border-[#E8DDD0] rounded-[20px] rounded-tl-[6px] px-5 py-4 shadow-sm">
-                  <p className="text-[14px] leading-[1.5] text-[#2B211C]">{confirmation.text}</p>
-                  <div className="flex gap-2 mt-3">
-                    <button onClick={() => setConfirmation(null)}
-                      className="text-[13px] font-medium bg-[#111] text-white px-4 py-2 rounded-full hover:bg-black transition">
-                      Sim, está correto
-                    </button>
-                    <button onClick={() => { setConfirmation(null); setStep(5); setMessages((m) => [...m, { role: "ai", text: "Sem problema. Me diz de novo: em média, quanto entra por mês?" }]); }}
-                      className="text-[13px] font-medium bg-[#FAF9F7] border border-[#E8DDD0] px-4 py-2 rounded-full hover:bg-white transition">
-                      Quero corrigir
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {typing && (
             <div className="flex gap-3">
               <Avatar />
@@ -1188,10 +1446,10 @@ function Onboarding({ onComplete, onSkip }) {
             </div>
           )}
 
-          {script[step]?.chips && !typing && (
+          {messages.length > 0 && messages.length <= 2 && !typing && (
             <div className="flex flex-wrap gap-2 pt-2 pl-11">
-              {script[step].chips.map((c) => (
-                <button key={c} onClick={() => submit(c)}
+              {sugestoes.map((c) => (
+                <button key={c} onClick={() => enviar(c)}
                   className="text-[13px] px-3.5 py-2 rounded-full bg-white border border-[#E8DDD0] text-[#2B211C] hover:border-[#111] hover:text-[#111] transition shadow-sm">
                   {c}
                 </button>
@@ -1205,35 +1463,21 @@ function Onboarding({ onComplete, onSkip }) {
 
       <div className="fixed bottom-0 inset-x-0 bg-gradient-to-t from-[#FAF9F7] via-[#FAF9F7] to-transparent pt-8 pb-6">
         <div className="w-full max-w-[760px] mx-auto px-6 md:px-8">
-          {readyToFinish ? (
-            <div className="flex flex-col items-center gap-4">
-              <button onClick={finish}
-                className="group w-full md:w-auto px-8 py-4 rounded-full bg-[#111] text-white text-[15px] font-medium flex items-center justify-center gap-3 shadow-[0_8px_24px_rgba(0,0,0,0.18)] hover:bg-black transition-all hover:-translate-y-0.5">
-                <I.Sparkles size={16} /> Gerar meu plano <I.ChevronRight size={16} />
-              </button>
-              <p className="text-[11px] text-[#9C8F85]">
-                Seus dados ficam só com você. Cálculos feitos por código, não por IA.
-              </p>
-            </div>
-          ) : (
-            <div className="flex items-end gap-3 bg-white rounded-[28px] border border-[#E8DDD0] shadow-[0_8px_30px_rgba(0,0,0,0.06)] px-2 py-2 focus-within:border-[#111] transition">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
-                placeholder={script[step]?.placeholder}
-                rows={1}
-                aria-label="Sua resposta"
-                className="flex-1 resize-none bg-transparent outline-none text-[15px] leading-[1.5] px-4 py-3 placeholder:text-[#B8A99A] max-h-[120px]"
-              />
-              <button onClick={() => submit()} disabled={!input.trim()}
-                aria-label="Enviar"
-                className="w-10 h-10 rounded-full bg-[#111] text-white flex items-center justify-center disabled:opacity-30 hover:bg-black transition shrink-0 mb-1">
-                <I.Send size={16} />
-              </button>
-            </div>
-          )}
+          <div className="flex items-end gap-3 bg-white rounded-[28px] border border-[#E8DDD0] shadow-[0_8px_30px_rgba(0,0,0,0.06)] px-2 py-2 focus-within:border-[#111] transition">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
+              placeholder="Digite sua resposta..."
+              rows={1}
+              className="flex-1 resize-none bg-transparent outline-none text-[15px] leading-[1.5] px-4 py-3 placeholder:text-[#B8A99A] max-h-[120px]"
+            />
+            <button onClick={() => enviar()} disabled={!input.trim() || typing}
+              className="w-10 h-10 rounded-full bg-[#111] text-white flex items-center justify-center disabled:opacity-30 hover:bg-black transition shrink-0 mb-1">
+              <I.Send size={16} />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2508,6 +2752,8 @@ function CardPainelResumo({ rendas, gastos }) {
 }
 
 function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
+  const [colapsado, setColapsado] = useState(false);
+
   const ehConta = tipo === "conta";
   const ehInvestimento = tipo === "investimento";
 
@@ -2602,8 +2848,8 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white w-full max-w-[480px] rounded-[24px] p-6" style={{maxHeight:"90vh",overflowY:"auto"}} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose} style={{padding: 16}}>
+      <div className="bg-white w-full rounded-[24px] p-6" style={{maxWidth: 480, maxHeight: "85vh", overflowY: "auto", margin: "auto"}} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-[16px] font-semibold">{initial ? "Editar" : "Adicionar"} {titulo}</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#FAF9F7] border border-[#E8DDD0] flex items-center justify-center">✕</button>

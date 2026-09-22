@@ -2835,6 +2835,9 @@ function App() {
           setState(EMPTY_STATE);
         }
         setScreen("dashboard");
+      } else {
+        setScreen("login");
+      }
     })();
 
     // Escuta mudanças de sessão (login/logout)

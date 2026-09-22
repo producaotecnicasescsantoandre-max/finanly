@@ -3426,14 +3426,20 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose} style={{padding: 16}}>
-      <div className="bg-white w-full rounded-[24px] p-6" style={{maxWidth: 480, maxHeight: "85vh", overflowY: "auto", margin: "auto"}} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-6">
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white w-full rounded-[24px] flex flex-col"
+        style={{ maxWidth: 480, maxHeight: "90vh", overflow: "hidden" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Cabeçalho fixo */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-[#F2EDE8]">
           <h3 className="text-[16px] font-semibold">{initial ? "Editar" : "Adicionar"} {titulo}</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-[#FAF9F7] border border-[#E8DDD0] flex items-center justify-center">✕</button>
         </div>
 
-        <div className="space-y-4">
+        {/* Corpo com rolagem */}
+        <div className="px-6 py-5 space-y-4" style={{ overflowY: "auto", flex: 1 }}>
           <div>
             <label className="block text-[12px] text-[#6B5F57] mb-1">Descrição</label>
             <input className="w-full bg-[#FAF9F7] border border-[#E8DDD0] rounded-xl px-4 py-3 text-[14px] outline-none focus:border-[#111]" value={descricao} onChange={(e) => setDescricao(e.target.value)} autoFocus />
@@ -3545,9 +3551,15 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
               </div>
             </>
           )}
+        </div>
 
-          <button onClick={salvar} disabled={!podeSalvar}
-            className="w-full py-3.5 rounded-full bg-[#111] text-white text-[14px] font-medium disabled:opacity-30">
+        {/* Rodapé fixo — SEMPRE visível */}
+        <div className="px-6 py-4 border-t border-[#F2EDE8] bg-white">
+          <button
+            onClick={salvar}
+            disabled={!podeSalvar}
+            className="w-full py-3.5 rounded-full bg-[#111] text-white text-[14px] font-medium disabled:opacity-30"
+          >
             {initial ? "Salvar alterações" : "Adicionar"}
           </button>
         </div>
@@ -3555,6 +3567,7 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
     </div>
   );
 }
+
 
 /* ── Modal de meta da reserva ──────────────────────────────── */
 function ModalPainelReserva({ config, onClose, onSave }) {

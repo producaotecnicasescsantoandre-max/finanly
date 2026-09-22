@@ -555,38 +555,14 @@ const EMPTY_STATE = {
 };
 
 const DEMO_STATE = {
-  nome: "Bruno",
-  familia: "Moro sozinho",
-  cidade: "São Paulo",
-  fonteRenda: "Freelas + pró-labore",
-  rendaMediaCents: 850000,
-  variacaoRenda: "Varia uns 30%",
-  gastosFixosCents: 277000,
-  gastosFixosList: [
-    { id: "1", name: "Aluguel", valueCents: 180000 },
-    { id: "2", name: "Internet + Luz", valueCents: 28000 },
-    { id: "3", name: "Plano de saúde", valueCents: 42000 },
-    { id: "4", name: "Academia", valueCents: 15000 },
-    { id: "5", name: "Streaming e apps", valueCents: 12000 },
-  ],
-  dividas: [
-    { id: "1", name: "Cartão Nubank", totalCents: 340000, parcelaCents: 110000 },
-    { id: "2", name: "Financiamento notebook", totalCents: 480000, parcelaCents: 40000 },
-  ],
-  reservaCents: 760000,
-  metasRaw: "reserva de 6 meses e viagem",
-  metas: [
-    { id: "1", title: "Reserva de 6 meses", valueCents: 1920000, months: 12, priority: "alta", progress: 39 },
-    { id: "2", title: "Viagem para Europa", valueCents: 1200000, months: 10, priority: "média", progress: 0 },
-    { id: "3", title: "Quitar dívidas", valueCents: 820000, months: 6, priority: "alta", progress: 0 },
-  ],
-  lancamentos: [],
-  items: [],
-  contas: [],
-  investimentos: [],
+  nome: "", familia: "", cidade: "", fonteRenda: "",
+  rendaMediaCents: 0, variacaoRenda: "", gastosFixosCents: 0, gastosFixosList: [],
+  dividas: [], reservaCents: 0, metasRaw: "", metas: [], lancamentos: [],
+  items: [], contas: [], investimentos: [],
   reservaConfig: { tipo: "meses", valor: 6 },
-  completed: true,
+  completed: false,
 };
+
 
 /* ─────────────────────────────────────────────────────────────
    PERSISTÊNCIA LOCAL
@@ -607,72 +583,69 @@ const loadState = () => {
 async function saveToSupabase(userId, state) {
   if (!userId) return { ok: false, error: "sem usuário" };
   try {
-    // 1) Perfil
-    await supabase.from("profiles").upsert({
+    // 1) Items (rendas, gastos)
+    await supabase.from("items").delete().eq("user_id", userId);
+    if ((state.items || []).length > 0) {
+      const rows = state.items.map((it) => ({
+        id: it.id,
+        user_id: userId,
+        tipo: it.tipo,
+        descricao: it.descricao || null,
+        valor_bruto_cents: it.valorBrutoCents || 0,
+        valor_liquido_cents: it.valorLiquidoCents || 0,
+        recorrencia: it.recorrencia || null,
+        mes: it.mes || null,
+        mes_inicio: it.mesInicio || null,
+        mes_fim: it.mesFim || null,
+        fixo: it.fixo !== undefined ? it.fixo : null,
+        conta_id: it.contaId || null,
+      }));
+      await supabase.from("items").insert(rows);
+    }
+
+    // 2) Contas
+    await supabase.from("accounts").delete().eq("user_id", userId);
+    if ((state.contas || []).length > 0) {
+      const rows = state.contas.map((c) => ({
+        id: c.id,
+        user_id: userId,
+        descricao: c.descricao || "Conta",
+        saldo_cents: c.saldoCents || 0,
+        is_reserva: !!c.isReserva,
+      }));
+      await supabase.from("accounts").insert(rows);
+    }
+
+    // 3) Investimentos
+    await supabase.from("investments").delete().eq("user_id", userId);
+    if ((state.investimentos || []).length > 0) {
+      const rows = state.investimentos.map((inv) => ({
+        id: inv.id,
+        user_id: userId,
+        descricao: inv.descricao || "Investimento",
+        banco: inv.banco || null,
+        conta_vinculada_id: inv.contaVinculadaId || null,
+        saiu_da_conta: !!inv.saiuDaConta,
+        valor_aplicado_cents: inv.valorAplicadoCents || 0,
+        valor_atual_cents: inv.valorAtualCents || 0,
+        taxa: inv.taxa || 0,
+        tipo_taxa: inv.tipoTaxa || null,
+        liquidez: inv.liquidez || null,
+        data_inicio: inv.dataInicio || null,
+        data_fim: inv.dataFim || null,
+        aporte_mensal_cents: inv.aporteMensalCents || 0,
+        historico: inv.historico || [],
+      }));
+      await supabase.from("investments").insert(rows);
+    }
+
+    // 4) Config da reserva
+    const reservaCfg = state.reservaConfig || { tipo: "meses", valor: 6 };
+    await supabase.from("user_config").upsert({
       user_id: userId,
-      name: state.nome || null,
-      city: state.cidade || null,
-      income_source: state.fonteRenda || null,
-      income_cents: state.rendaMediaCents || 0,
-      expenses_fixed_cents: state.gastosFixosCents || 0,
-      savings_cents: state.reservaCents || 0,
+      reserva_tipo: reservaCfg.tipo,
+      reserva_valor: reservaCfg.valor,
     }, { onConflict: "user_id" });
-
-    // 2) Dívidas — apaga as antigas e insere as atuais
-    await supabase.from("debts").delete().eq("user_id", userId);
-    if ((state.dividas || []).length > 0) {
-      await supabase.from("debts").insert(
-        state.dividas.map((d) => ({
-          user_id: userId,
-          name: d.name || "Dívida",
-          total_cents: d.totalCents || 0,
-          installment_cents: d.parcelaCents || 0,
-        }))
-      );
-    }
-
-    // 3) Metas — apaga as antigas e insere as atuais
-    await supabase.from("goals").delete().eq("user_id", userId);
-    if ((state.metas || []).length > 0) {
-      await supabase.from("goals").insert(
-        state.metas.map((m) => ({
-          user_id: userId,
-          title: m.title || "Meta",
-          target_cents: m.valueCents || 0,
-          months: m.months || 12,
-          priority: m.priority || "média",
-        }))
-      );
-    }
-
-    // 4) Lançamentos — apaga os antigos e insere os atuais
-    await supabase.from("incomes").delete().eq("user_id", userId);
-    await supabase.from("expenses").delete().eq("user_id", userId);
-
-    const receitas = (state.lancamentos || []).filter(l => l.tipo === "receita");
-    const despesas = (state.lancamentos || []).filter(l => l.tipo === "despesa");
-
-    if (receitas.length > 0) {
-      await supabase.from("incomes").insert(
-        receitas.map((r) => ({
-          user_id: userId,
-          description: r.descricao || "Receita",
-          amount_cents: r.valueCents || 0,
-          received_at: new Date(r.date || Date.now()).toISOString().split("T")[0],
-        }))
-      );
-    }
-    if (despesas.length > 0) {
-      await supabase.from("expenses").insert(
-        despesas.map((d) => ({
-          user_id: userId,
-          description: d.descricao || "Despesa",
-          amount_cents: d.valueCents || 0,
-          paid_at: new Date(d.date || Date.now()).toISOString().split("T")[0],
-          is_fixed: !!d.isFixed,
-        }))
-      );
-    }
 
     return { ok: true };
   } catch (e) {
@@ -684,74 +657,69 @@ async function saveToSupabase(userId, state) {
 async function loadFromSupabase(userId) {
   if (!userId) return null;
   try {
-    const [profileRes, debtsRes, goalsRes, incomesRes, expensesRes] = await Promise.all([
-      supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
-      supabase.from("debts").select("*").eq("user_id", userId),
-      supabase.from("goals").select("*").eq("user_id", userId),
-      supabase.from("incomes").select("*").eq("user_id", userId),
-      supabase.from("expenses").select("*").eq("user_id", userId),
+    const [itemsRes, contasRes, invRes, cfgRes] = await Promise.all([
+      supabase.from("items").select("*").eq("user_id", userId),
+      supabase.from("accounts").select("*").eq("user_id", userId),
+      supabase.from("investments").select("*").eq("user_id", userId),
+      supabase.from("user_config").select("*").eq("user_id", userId).maybeSingle(),
     ]);
 
-    const profile = profileRes.data;
-    // Se o usuário ainda não tem perfil, retorna null (é novo)
-    if (!profile) return null;
-
-    const dividas = (debtsRes.data || []).map((d) => ({
-      id: String(d.id),
-      name: d.name,
-      totalCents: d.total_cents,
-      parcelaCents: d.installment_cents,
+    const items = (itemsRes.data || []).map((r) => ({
+      id: r.id,
+      tipo: r.tipo,
+      descricao: r.descricao || "",
+      valorBrutoCents: r.valor_bruto_cents || 0,
+      valorLiquidoCents: r.valor_liquido_cents || 0,
+      recorrencia: r.recorrencia || "pontual",
+      mes: r.mes || undefined,
+      mesInicio: r.mes_inicio || undefined,
+      mesFim: r.mes_fim || undefined,
+      fixo: r.fixo,
+      contaId: r.conta_id || null,
     }));
 
-    const metas = (goalsRes.data || []).map((g) => ({
-      id: String(g.id),
-      title: g.title,
-      valueCents: g.target_cents,
-      months: g.months,
-      priority: g.priority,
-      progress: 0,
+    const contas = (contasRes.data || []).map((r) => ({
+      id: r.id,
+      descricao: r.descricao,
+      saldoCents: r.saldo_cents || 0,
+      isReserva: !!r.is_reserva,
     }));
 
-    const lancamentos = [
-      ...(incomesRes.data || []).map((i) => ({
-        id: `in-${i.id}`,
-        tipo: "receita",
-        descricao: i.description,
-        valueCents: i.amount_cents,
-        date: i.received_at,
-        isFixed: false,
-      })),
-      ...(expensesRes.data || []).map((e) => ({
-        id: `ex-${e.id}`,
-        tipo: "despesa",
-        descricao: e.description,
-        valueCents: e.amount_cents,
-        date: e.paid_at,
-        isFixed: e.is_fixed,
-      })),
-    ];
+    const investimentos = (invRes.data || []).map((r) => ({
+      id: r.id,
+      descricao: r.descricao,
+      banco: r.banco || "",
+      contaVinculadaId: r.conta_vinculada_id || null,
+      saiuDaConta: !!r.saiu_da_conta,
+      valorAplicadoCents: r.valor_aplicado_cents || 0,
+      valorAtualCents: r.valor_atual_cents || 0,
+      taxa: r.taxa || 0,
+      tipoTaxa: r.tipo_taxa || "anual",
+      liquidez: r.liquidez || "D0",
+      dataInicio: r.data_inicio || null,
+      dataFim: r.data_fim || null,
+      aporteMensalCents: r.aporte_mensal_cents || 0,
+      historico: Array.isArray(r.historico) ? r.historico : [],
+    }));
+
+    const cfg = cfgRes.data;
+    const reservaConfig = cfg
+      ? { tipo: cfg.reserva_tipo || "meses", valor: Number(cfg.reserva_valor) || 6 }
+      : { tipo: "meses", valor: 6 };
 
     return {
-      nome: profile.name || "",
-      cidade: profile.city || "",
-      fonteRenda: profile.income_source || "",
-      rendaMediaCents: profile.income_cents || 0,
-      gastosFixosCents: profile.expenses_fixed_cents || 0,
-      reservaCents: profile.savings_cents || 0,
-      variacaoRenda: "",
-      familia: "",
-      gastosFixosList: [],
-      dividas,
-      metas,
-      metasRaw: "",
-      lancamentos,
-      completed: true,
+      items,
+      contas,
+      investimentos,
+      reservaConfig,
+      completed: items.length > 0 || contas.length > 0,
     };
   } catch (e) {
     console.error("Erro ao carregar do Supabase:", e);
     return null;
   }
 }
+
 
 /* ─────────────────────────────────────────────────────────────
    ROTEIRO DE ONBOARDING
@@ -2861,15 +2829,12 @@ function App() {
       if (currentUser) {
         setUser(currentUser);
         const saved = await loadFromSupabase(currentUser.id);
-        if (saved && saved.completed) {
+        if (saved) {
           setState(saved);
-          setScreen("dashboard");
         } else {
-          setScreen("onboarding");
+          setState(EMPTY_STATE);
         }
-      } else {
-        setScreen("login");
-      }
+        setScreen("dashboard");
     })();
 
     // Escuta mudanças de sessão (login/logout)

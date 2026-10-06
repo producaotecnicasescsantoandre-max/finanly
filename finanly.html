@@ -109,6 +109,7 @@ textarea,input{font-family:inherit}
 </head>
 <body>
 <div id="root"></div>
+<script src="https://cdn.pluggy.ai/pluggy-connect-sdk.js"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -2391,6 +2392,48 @@ function saldoReserva(investimentos) {
 }
 
 /* ── PAINEL VISÃO GERAL (completo, com todas as funções) ───── */
+async function abrirWidgetPluggy(onSuccess) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/pluggy-token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+      },
+      body: JSON.stringify({}),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error || `Erro ${res.status}`);
+    }
+
+    const { accessToken } = await res.json();
+    if (!accessToken) throw new Error("Connect token não recebido");
+
+    if (!window.PluggyConnect) {
+      throw new Error("SDK da Pluggy não carregou. Recarregue a página.");
+    }
+
+    const pluggyConnect = new window.PluggyConnect({
+      connectToken: accessToken,
+      includeSandbox: true,
+      onSuccess: (itemData) => {
+        if (onSuccess) onSuccess(itemData);
+      },
+      onError: (error) => {
+        console.error("Erro no widget Pluggy:", error);
+        alert("Erro ao conectar banco: " + (error?.message || "tente novamente"));
+      },
+    });
+
+    pluggyConnect.init();
+  } catch (e) {
+    console.error("Erro ao abrir widget:", e);
+    alert("Não foi possível abrir a conexão bancária: " + e.message);
+  }
+}
+
 function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setState }) {
   const agora = new Date();
   const [ano, setAno] = useState(agora.getFullYear());
@@ -2505,6 +2548,20 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
           <p className="text-[18px] font-medium">{KEY_MESES[mes]} {ano}</p>
           <p className="text-[11px] text-[#8A7F76]">{ehMesAtual ? "mês atual" : "outro mês"}</p>
         </div>
+      <div className="bg-white border border-[#E8DDD0] rounded-2xl px-4 py-3 mb-4 flex items-center justify-between">
+        <div>
+          <p className="text-[13px] font-medium text-[#0a0a0a]">Conectar banco</p>
+          <p className="text-[11px] text-[#8A7F76]">Puxe saldos e transações automaticamente</p>
+        </div>
+        <button
+          onClick={() => abrirWidgetPluggy((item) => {
+            alert("Banco conectado: " + (item?.itemId || "ok"));
+          })}
+          className="text-[12px] bg-[#111] text-white px-4 py-2 rounded-full hover:bg-black transition"
+        >
+          Conectar
+        </button>
+      </div>
         <button onClick={() => navegar(1)} className="w-8 h-8 rounded-full bg-white border border-[#E8DDD0] flex items-center justify-center text-[16px]">→</button>
       </div>
 

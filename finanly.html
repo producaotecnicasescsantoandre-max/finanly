@@ -2555,7 +2555,8 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
         </div>
         <button
           onClick={() => abrirWidgetPluggy((item) => {
-            alert("Banco conectado: " + (item?.itemId || "ok"));
+console.log("PLUGGY_ITEM_COMPLETO:", JSON.stringify(item, null, 2));
+alert("Banco conectado! Item ID: " + (item?.item?.id || item?.itemId || item?.id || "não encontrado"));
           })}
           className="text-[12px] bg-[#111] text-white px-4 py-2 rounded-full hover:bg-black transition"
         >

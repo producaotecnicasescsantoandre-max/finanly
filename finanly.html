@@ -583,10 +583,22 @@ const loadState = () => {
 async function saveToSupabase(userId, state) {
   if (!userId) return { ok: false, error: "sem usuário" };
   try {
-    // 1) Items (rendas, gastos)
-    await supabase.from("items").delete().eq("user_id", userId);
-    if ((state.items || []).length > 0) {
-      const rows = state.items.map((it) => ({
+    /* ───── ITEMS ───── */
+    const itemsLocais = state.items || [];
+    const { data: itemsRemotos } = await supabase
+      .from("items").select("id").eq("user_id", userId);
+
+    const idsLocais = new Set(itemsLocais.map((it) => it.id));
+    const idsParaApagar = (itemsRemotos || [])
+      .map((r) => r.id)
+      .filter((id) => !idsLocais.has(id));
+
+    if (idsParaApagar.length > 0) {
+      await supabase.from("items").delete().eq("user_id", userId).in("id", idsParaApagar);
+    }
+
+    if (itemsLocais.length > 0) {
+      const rows = itemsLocais.map((it) => ({
         id: it.id,
         user_id: userId,
         tipo: it.tipo,
@@ -600,26 +612,50 @@ async function saveToSupabase(userId, state) {
         fixo: it.fixo !== undefined ? it.fixo : null,
         conta_id: it.contaId || null,
       }));
-      await supabase.from("items").insert(rows);
+      await supabase.from("items").upsert(rows, { onConflict: "id" });
     }
 
-    // 2) Contas
-    await supabase.from("accounts").delete().eq("user_id", userId);
-    if ((state.contas || []).length > 0) {
-      const rows = state.contas.map((c) => ({
+    /* ───── ACCOUNTS ───── */
+    const contasLocais = state.contas || [];
+    const { data: contasRemotas } = await supabase
+      .from("accounts").select("id").eq("user_id", userId);
+
+    const idsContasLocais = new Set(contasLocais.map((c) => c.id));
+    const contasParaApagar = (contasRemotas || [])
+      .map((r) => r.id)
+      .filter((id) => !idsContasLocais.has(id));
+
+    if (contasParaApagar.length > 0) {
+      await supabase.from("accounts").delete().eq("user_id", userId).in("id", contasParaApagar);
+    }
+
+    if (contasLocais.length > 0) {
+      const rows = contasLocais.map((c) => ({
         id: c.id,
         user_id: userId,
         descricao: c.descricao || "Conta",
         saldo_cents: c.saldoCents || 0,
         is_reserva: !!c.isReserva,
       }));
-      await supabase.from("accounts").insert(rows);
+      await supabase.from("accounts").upsert(rows, { onConflict: "id" });
     }
 
-    // 3) Investimentos
-    await supabase.from("investments").delete().eq("user_id", userId);
-    if ((state.investimentos || []).length > 0) {
-      const rows = state.investimentos.map((inv) => ({
+    /* ───── INVESTMENTS ───── */
+    const invLocais = state.investimentos || [];
+    const { data: invRemotos } = await supabase
+      .from("investments").select("id").eq("user_id", userId);
+
+    const idsInvLocais = new Set(invLocais.map((i) => i.id));
+    const invParaApagar = (invRemotos || [])
+      .map((r) => r.id)
+      .filter((id) => !idsInvLocais.has(id));
+
+    if (invParaApagar.length > 0) {
+      await supabase.from("investments").delete().eq("user_id", userId).in("id", invParaApagar);
+    }
+
+    if (invLocais.length > 0) {
+      const rows = invLocais.map((inv) => ({
         id: inv.id,
         user_id: userId,
         descricao: inv.descricao || "Investimento",
@@ -636,11 +672,29 @@ async function saveToSupabase(userId, state) {
         aporte_mensal_cents: inv.aporteMensalCents || 0,
         historico: inv.historico || [],
       }));
-      await supabase.from("investments").insert(rows);
+      await supabase.from("investments").upsert(rows, { onConflict: "id" });
     }
 
-    // 4) Config da reserva
+    /* ───── USER_CONFIG ───── */
     const reservaCfg = state.reservaConfig || { tipo: "meses", valor: 6 };
+    /* ───── USER_PROFILE (campos antigos) ───── */
+    await supabase.from("user_profile").upsert({
+      user_id: userId,
+      nome: state.nome || null,
+      familia: state.familia || null,
+      cidade: state.cidade || null,
+      fonte_renda: state.fonteRenda || null,
+      renda_media_cents: state.rendaMediaCents || 0,
+      variacao_renda: state.variacaoRenda || null,
+      gastos_fixos_cents: state.gastosFixosCents || 0,
+      gastos_fixos_list: state.gastosFixosList || [],
+      dividas: state.dividas || [],
+      reserva_cents: state.reservaCents || 0,
+      metas_raw: state.metasRaw || null,
+      metas: state.metas || [],
+      lancamentos: state.lancamentos || [],
+      completed: !!state.completed,
+    }, { onConflict: "user_id" });
     await supabase.from("user_config").upsert({
       user_id: userId,
       reserva_tipo: reservaCfg.tipo,
@@ -707,25 +761,33 @@ async function loadFromSupabase(userId) {
       ? { tipo: cfg.reserva_tipo || "meses", valor: Number(cfg.reserva_valor) || 6 }
       : { tipo: "meses", valor: 6 };
 
+    const { data: profileData } = await supabase
+      .from("user_profile")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const perfil = profileData || {};
+
     return {
-      nome: "",
-      familia: "",
-      cidade: "",
-      fonteRenda: "",
-      rendaMediaCents: 0,
-      variacaoRenda: "",
-      gastosFixosCents: 0,
-      gastosFixosList: [],
-      dividas: [],
-      reservaCents: 0,
-      metasRaw: "",
-      metas: [],
-      lancamentos: [],
+      nome: perfil.nome || "",
+      familia: perfil.familia || "",
+      cidade: perfil.cidade || "",
+      fonteRenda: perfil.fonte_renda || "",
+      rendaMediaCents: perfil.renda_media_cents || 0,
+      variacaoRenda: perfil.variacao_renda || "",
+      gastosFixosCents: perfil.gastos_fixos_cents || 0,
+      gastosFixosList: Array.isArray(perfil.gastos_fixos_list) ? perfil.gastos_fixos_list : [],
+      dividas: Array.isArray(perfil.dividas) ? perfil.dividas : [],
+      reservaCents: perfil.reserva_cents || 0,
+      metasRaw: perfil.metas_raw || "",
+      metas: Array.isArray(perfil.metas) ? perfil.metas : [],
+      lancamentos: Array.isArray(perfil.lancamentos) ? perfil.lancamentos : [],
       items,
       contas,
       investimentos,
       reservaConfig,
-      completed: items.length > 0 || contas.length > 0,
+      completed: perfil.completed || items.length > 0 || contas.length > 0,
     };
   } catch (e) {
     console.error("Erro ao carregar do Supabase:", e);

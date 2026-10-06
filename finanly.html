@@ -2418,8 +2418,10 @@ async function abrirWidgetPluggy(onSuccess) {
     const pluggyConnect = new window.PluggyConnect({
       connectToken: accessToken,
       includeSandbox: true,
-      onSuccess: (itemData) => {
-        if (onSuccess) onSuccess(itemData);
+      onSuccess: async (itemData) => {
+        if (onSuccess) {
+          await onSuccess(itemData);
+        }
       },
       onError: (error) => {
         console.error("Erro no widget Pluggy:", error);

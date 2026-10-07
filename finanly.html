@@ -2418,10 +2418,8 @@ async function abrirWidgetPluggy(onSuccess) {
     const pluggyConnect = new window.PluggyConnect({
       connectToken: accessToken,
       includeSandbox: true,
-      onSuccess: async (itemData) => {
-        if (onSuccess) {
-          await onSuccess(itemData);
-        }
+      onSuccess: (itemData) => {
+        if (onSuccess) onSuccess(itemData);
       },
       onError: (error) => {
         console.error("Erro no widget Pluggy:", error);
@@ -2556,46 +2554,101 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
           <p className="text-[11px] text-[#8A7F76]">Puxe saldos e transações automaticamente</p>
         </div>
         <button
-          onClick={async () => {
-            await abrirWidgetPluggy(async (item) => {
-              console.log("PLUGGY_ITEM_COMPLETO:", JSON.stringify(item, null, 2));
-              const itemIdReal = item?.item?.id || item?.itemId || item?.id;
-              if (!itemIdReal) {
-                alert("Não foi possível identificar o item da conexão.");
-                return;
-              }
-              try {
-                const resp = await fetch(`${SUPABASE_URL}/functions/v1/pluggy-dados`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${SUPABASE_KEY}`,
-                  },
-                  body: JSON.stringify({ itemId: itemIdReal }),
-                });
-                const dados = await resp.json();
-                if (!resp.ok || !dados.ok) {
-                  alert("Banco conectado, mas houve erro ao puxar dados: " + (dados.error || resp.status));
-                  return;
-                }
+          onClick={() => abrirWidgetPluggy((item) => {
+console.log("PLUGGY_ITEM_COMPLETO:", JSON.stringify(item, null, 2));
+const itemIdReal = item?.item?.id || item?.itemId || item?.id;
+if (!itemIdReal) {
+  alert("Não foi possível identificar o item da conexão.");
+  return;
+}
+
+try {
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/pluggy-dados`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+    },
+    body: JSON.stringify({ itemId: itemIdReal }),
+  });
+
+  const dados = await resp.json();
+
+  if (!resp.ok || !dados.ok) {
+    alert("Banco conectado, mas houve erro ao puxar dados: " + (dados.error || resp.status));
+    return;
+  }
+
                 const novasContas = (dados.contas || []).map((c) => ({
                   id: `pluggy-${c.id}`,
                   descricao: c.name || "Conta Pluggy",
                   saldoCents: Math.round((c.balance || 0) * 100),
                   isReserva: false,
                 }));
+
+                const transacoes = dados.transacoes || [];
+                const novosItens = transacoes.map((t) => {
+                  const ehEntrada = (t.amount || 0) > 0;
+                  const valorCents = Math.abs(Math.round((t.amount || 0) * 100));
+                  const data = new Date(t.date);
+                  const ano = data.getFullYear();
+                  const mes = String(data.getMonth() + 1).padStart(2, "0");
+                  return {
+                    id: `pluggy-tx-${t.id}`,
+                    tipo: ehEntrada ? "renda" : "gasto",
+                    descricao: t.description || t.descriptionRaw || "Transação Pluggy",
+                    valorBrutoCents: valorCents,
+                    valorLiquidoCents: valorCents,
+                    recorrencia: "pontual",
+                    mes: `${ano}-${mes}`,
+                    contaId: `pluggy-${t.accountId}`,
+                    fixo: false,
+                  };
+                });
+
+                const novosInvestimentos = (dados.investimentos || []).map((i) => ({
+                  id: `pluggy-inv-${i.id}`,
+                  descricao: i.name || "Investimento Pluggy",
+                  banco: i.institutionName || "",
+                  contaVinculadaId: `pluggy-${i.accountId}`,
+                  saiuDaConta: false,
+                  valorAplicadoCents: Math.round((i.amountOriginal || i.amount || 0) * 100),
+                  valorAtualCents: Math.round((i.balance || 0) * 100),
+                  taxa: 0,
+                  tipoTaxa: "anual",
+                  liquidez: "D0",
+                  dataInicio: i.date ? i.date.slice(0, 7) : null,
+                  dataFim: null,
+                  aporteMensalCents: 0,
+                  historico: [],
+                }));
+
                 setState((s) => {
                   const contasAtuais = s.contas || [];
-                  const idsExistentes = new Set(contasAtuais.map((x) => x.id));
-                  const contasNovas = novasContas.filter((c) => !idsExistentes.has(c.id));
-                  return { ...s, contas: [...contasAtuais, ...contasNovas] };
+                  const idsContas = new Set(contasAtuais.map((x) => x.id));
+                  const contasNovas = novasContas.filter((c) => !idsContas.has(c.id));
+
+                  const itensAtuais = s.items || [];
+                  const idsItens = new Set(itensAtuais.map((x) => x.id));
+                  const itensNovos = novosItens.filter((i) => !idsItens.has(i.id));
+
+                  const invAtuais = s.investimentos || [];
+                  const idsInv = new Set(invAtuais.map((x) => x.id));
+                  const invNovos = novosInvestimentos.filter((i) => !idsInv.has(i.id));
+
+                  return {
+                    ...s,
+                    contas: [...contasAtuais, ...contasNovas],
+                    items: [...itensAtuais, ...itensNovos],
+                    investimentos: [...invAtuais, ...invNovos],
+                  };
                 });
-                alert(`Banco conectado! ${novasContas.length} conta(s) adicionada(s).`);
+
+                alert(`Banco conectado! ${novasContas.length} conta(s), ${novosItens.length} transação(ões) e ${novosInvestimentos.length} investimento(s) adicionados.`);
               } catch (e) {
                 alert("Erro ao buscar dados do banco: " + e.message);
               }
-            });
-          }}
+          })}
           className="text-[12px] bg-[#111] text-white px-4 py-2 rounded-full hover:bg-black transition"
         >
           Conectar

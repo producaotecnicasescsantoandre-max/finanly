@@ -734,19 +734,17 @@ async function sincronizarPluggyAutomatico(userId, stateAtual) {
       // Se nunca sincronizou, esta é a primeira conexão deste banco:
       // só puxa dados atuais (contas, cartão, investimentos), sem transações.
       const primeiraConexao = !conexao.created_at_atual;
-      const dataConexao = conexao.created_at ? new Date(conexao.created_at) : new Date();
 
       let from;
       if (primeiraConexao) {
-        // Janela mínima só para pegar os dados atuais (contas/cartão/investimentos).
-        // A Edge Function sempre devolve as contas, independente do from.
+        // Janela mínima só para pegar os dados atuais.
         const d = new Date();
         d.setDate(d.getDate() - 1);
         from = d.toISOString().slice(0, 10);
       } else {
-        // Sincronizações seguintes: pega só a partir da data da conexão.
-        const d = new Date(dataConexao);
-        d.setDate(d.getDate() - 1); // margem de 1 dia por fuso
+        // Sincronizações seguintes: pega desde a data da conexão.
+        const d = new Date(conexao.created_at || new Date());
+        d.setDate(d.getDate() - 1);
         from = d.toISOString().slice(0, 10);
       }
 
@@ -775,12 +773,14 @@ async function sincronizarPluggyAutomatico(userId, stateAtual) {
         transacoesAcumuladas.push(...(dados.transacoes || []));
       }
 
-      // Marca que a conexão já foi sincronizada (para as próximas vezes).
+      // Marca que a conexão já foi sincronizada uma vez.
       await supabase
         .from("pluggy_connections")
         .update({ last_sync_at: new Date().toISOString(), created_at_atual: true })
         .eq("id", conexao.id);
     }
+
+
     const novasContas = contasAcumuladas.map((c) => ({
       id: `pluggy-${c.id}`,
       descricao: c.name || "Conta Pluggy",

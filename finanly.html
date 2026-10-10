@@ -612,6 +612,7 @@ async function saveToSupabase(userId, state) {
         mes_fim: it.mesFim || null,
         fixo: it.fixo !== undefined ? it.fixo : null,
         conta_id: it.contaId || null,
+        data: it.data || null,
       }));
       await supabase.from("items").upsert(rows, { onConflict: "id" });
     }
@@ -789,6 +790,7 @@ async function sincronizarPluggyAutomatico(userId, stateAtual) {
         valorLiquidoCents: valorCents,
         recorrencia: "pontual",
         mes: `${ano}-${mes}`,
+        data: t.date || null,
         contaId: `pluggy-${t.accountId}`,
         fixo: false,
       };
@@ -875,6 +877,7 @@ async function loadFromSupabase(userId) {
       mesFim: r.mes_fim || undefined,
       fixo: r.fixo,
       contaId: r.conta_id || null,
+      data: r.data || null,
     }));
 
     const contas = (contasRes.data || []).map((r) => ({
@@ -3008,10 +3011,24 @@ function CardPainelLista({ titulo, items, cor, sinal, contas, onAdd, onEdit, onD
                   {aberto && grupo.items.map((it) => (
                     <div key={it.id} onClick={() => onEdit(it)}
                       style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 4px", borderBottom:"1px solid #EDE7DF", cursor:"pointer", gap:8}}>
-                      <p className="text-[13px] font-medium text-[#0a0a0a]" style={{overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1}}>
-                        {it.descricao}
-                        {it.fixo === true && <span className="text-[10px] text-[#6b6b6b] font-medium"> · F</span>}
-                      </p>
+                      <div style={{flex:1, minWidth:0}}>
+                        <p className="text-[13px] font-medium text-[#0a0a0a]" style={{overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                          {it.descricao}
+                          {it.fixo === true && <span className="text-[10px] text-[#6b6b6b] font-medium"> · F</span>}
+                        </p>
+                        {it.data && (
+                          <p className="text-[11px] text-[#6b6b6b]" style={{marginTop:2}}>
+                            {(() => {
+                              const d = new Date(it.data);
+                              const dd = String(d.getDate()).padStart(2, "0");
+                              const mm = String(d.getMonth() + 1).padStart(2, "0");
+                              const hh = String(d.getHours()).padStart(2, "0");
+                              const mi = String(d.getMinutes()).padStart(2, "0");
+                              return `${dd}/${mm}/${d.getFullYear()} ${hh}:${mi}`;
+                            })()}
+                          </p>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <span className="text-[14px] font-medium" style={{color: cor}}>
                           {sinal === "-" ? "−" : ""}{brl(it.valorLiquidoCents)}

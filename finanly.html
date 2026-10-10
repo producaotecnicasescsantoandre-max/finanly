@@ -709,6 +709,140 @@ async function saveToSupabase(userId, state) {
   }
 }
 
+async function sincronizarPluggyAutomatico(userId, stateAtual) {
+  if (!userId) return { ok: false, motivo: "sem usuário" };
+  try {
+    const { data: conexoes, error } = await supabase
+      .from("pluggy_connections")
+      .select("*")
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("Erro ao ler conexões:", error);
+      return { ok: false, motivo: "erro lendo conexoes" };
+    }
+    if (!conexoes || conexoes.length === 0) {
+      return { ok: false, motivo: "sem conexao" };
+    }
+
+    let contasAcumuladas = [];
+    let transacoesAcumuladas = [];
+    let investimentosAcumulados = [];
+
+    for (const conexao of conexoes) {
+      let from;
+      if (conexao.last_sync_at) {
+        const d = new Date(conexao.last_sync_at);
+        d.setDate(d.getDate() - 2);
+        from = d.toISOString().slice(0, 10);
+      } else {
+        const d = new Date();
+        d.setMonth(d.getMonth() - 24);
+        from = d.toISOString().slice(0, 10);
+      }
+
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/pluggy-dados`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: conexao.item_id, from }),
+      });
+
+      if (!resp.ok) {
+        console.error("Erro na sincronização:", resp.status);
+        continue;
+      }
+
+      const dados = await resp.json();
+      if (!dados.ok) {
+        console.error("Erro retornado:", dados.error);
+        continue;
+      }
+
+      contasAcumuladas.push(...(dados.contas || []));
+      transacoesAcumuladas.push(...(dados.transacoes || []));
+      investimentosAcumulados.push(...(dados.investimentos || []));
+
+      await supabase
+        .from("pluggy_connections")
+        .update({ last_sync_at: new Date().toISOString() })
+        .eq("id", conexao.id);
+    }
+
+    const novasContas = contasAcumuladas.map((c) => ({
+      id: `pluggy-${c.id}`,
+      descricao: c.name || "Conta Pluggy",
+      saldoCents: Math.round((c.balance || 0) * 100),
+      isReserva: false,
+    }));
+
+    const novosItens = transacoesAcumuladas.map((t) => {
+      const ehEntrada = (t.amount || 0) > 0;
+      const valorCents = Math.abs(Math.round((t.amount || 0) * 100));
+      const data = new Date(t.date);
+      const ano = data.getFullYear();
+      const mes = String(data.getMonth() + 1).padStart(2, "0");
+      return {
+        id: `pluggy-tx-${t.id}`,
+        tipo: ehEntrada ? "renda" : "gasto",
+        descricao: t.description || t.descriptionRaw || "Transação Pluggy",
+        valorBrutoCents: valorCents,
+        valorLiquidoCents: valorCents,
+        recorrencia: "pontual",
+        mes: `${ano}-${mes}`,
+        contaId: `pluggy-${t.accountId}`,
+        fixo: false,
+      };
+    });
+
+    const novosInvestimentos = investimentosAcumulados.map((i) => ({
+      id: `pluggy-inv-${i.id}`,
+      descricao: i.name || "Investimento Pluggy",
+      banco: i.institutionName || "",
+      contaVinculadaId: `pluggy-${i.accountId}`,
+      saiuDaConta: false,
+      valorAplicadoCents: Math.round((i.amountOriginal || i.amount || 0) * 100),
+      valorAtualCents: Math.round((i.balance || 0) * 100),
+      taxa: 0,
+      tipoTaxa: "anual",
+      liquidez: "D0",
+      dataInicio: i.date ? i.date.slice(0, 7) : null,
+      dataFim: null,
+      aporteMensalCents: 0,
+      historico: [],
+    }));
+
+    const idsContasAtuais = new Set((stateAtual.contas || []).map((c) => c.id));
+    const contasFinal = [
+      ...(stateAtual.contas || []),
+      ...novasContas.filter((c) => !idsContasAtuais.has(c.id)),
+    ];
+
+    const idsItensAtuais = new Set((stateAtual.items || []).map((i) => i.id));
+    const itensFinal = [
+      ...(stateAtual.items || []),
+      ...novosItens.filter((i) => !idsItensAtuais.has(i.id)),
+    ];
+
+    const idsInvAtuais = new Set((stateAtual.investimentos || []).map((i) => i.id));
+    const investimentosFinal = [
+      ...(stateAtual.investimentos || []),
+      ...novosInvestimentos.filter((i) => !idsInvAtuais.has(i.id)),
+    ];
+
+    return {
+      ok: true,
+      contas: contasFinal,
+      items: itensFinal,
+      investimentos: investimentosFinal,
+      novosItens: novosItens.length,
+      novasTransacoes: transacoesAcumuladas.length,
+    };
+  } catch (e) {
+    console.error("Erro na sincronização automática:", e);
+    return { ok: false, motivo: String(e) };
+  }
+}
+
 async function loadFromSupabase(userId) {
   if (!userId) return null;
   try {
@@ -2365,16 +2499,13 @@ function esperadoHojeInv(inv) {
 }
 
 function calcularSaldoConta(conta, items, investimentos) {
-  const movimentos = (items || []).filter((i) => i.contaId === conta.id);
-  let saldo = conta.saldoCents || 0;
-  for (const m of movimentos) {
-    const valor = m.valorLiquidoCents || m.valorBrutoCents || 0;
-    if (m.tipo === "renda") saldo += valor;
-    if (m.tipo === "gasto") saldo -= valor;
-  }
+  // O saldo da conta é o valor informado pelo banco (via Pluggy ou manual).
+  // As transações servem para os cards de "Renda do mês" e "Gastos do mês",
+  // não para recalcular o saldo — o saldo já é o consolidado atual.
   const saidas = (investimentos || []).filter(
     (inv) => inv.contaVinculadaId === conta.id && inv.saiuDaConta
   );
+  let saldo = conta.saldoCents || 0;
   for (const inv of saidas) saldo -= (inv.valorAplicadoCents || 0);
   return saldo;
 }
@@ -2564,6 +2695,21 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
                 alert("Não foi possível identificar o item da conexão.");
                 return;
               }
+
+              // Salva a conexão na tabela pluggy_connections para sincronizações futuras
+              try {
+                const { data: userData } = await supabase.auth.getUser();
+                if (userData?.user?.id) {
+                  await supabase.from("pluggy_connections").upsert({
+                    user_id: userData.user.id,
+                    item_id: itemIdReal,
+                    last_sync_at: null,
+                  }, { onConflict: "user_id,item_id" });
+                }
+              } catch (e) {
+                console.error("Erro ao salvar conexão Pluggy:", e);
+              }
+
               try {
                 const resp = await fetch(`${SUPABASE_URL}/functions/v1/pluggy-dados`, {
                   method: "POST",
@@ -3980,12 +4126,26 @@ function App() {
       if (currentUser) {
         setUser(currentUser);
         const saved = await loadFromSupabase(currentUser.id);
-        if (saved) {
-          setState(saved);
-        } else {
-          setState(EMPTY_STATE);
-        }
+        const estadoInicial = saved || EMPTY_STATE;
+        setState(estadoInicial);
         setScreen("dashboard");
+
+        // Sincronização automática com a Pluggy em segundo plano
+        (async () => {
+          try {
+            const resultado = await sincronizarPluggyAutomatico(currentUser.id, estadoInicial);
+            if (resultado.ok) {
+              setState((s) => ({
+                ...s,
+                contas: resultado.contas,
+                items: resultado.items,
+                investimentos: resultado.investimentos,
+              }));
+            }
+          } catch (e) {
+            console.error("Falha na sincronização automática:", e);
+          }
+        })();
       } else {
         setScreen("login");
       }

@@ -3766,6 +3766,19 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
   const [mesInicio, setMesInicio] = useState(initial?.mesInicio || initial?.mes || mesAtual);
   const [temFim, setTemFim] = useState(!!initial?.mesFim);
   const [mesFim, setMesFim] = useState(initial?.mesFim || "");
+  const [dataHora, setDataHora] = useState(() => {
+    if (initial?.data) {
+      const d = new Date(initial.data);
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    if (!initial) {
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    return "";
+  });
   const [fixo, setFixo] = useState(initial?.fixo !== undefined ? initial.fixo : true);
   const [contaId, setContaId] = useState(initial?.contaId || "");
   const [ehReserva, setEhReserva] = useState(!!initial?.isReserva);
@@ -3820,6 +3833,7 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
       tipo, descricao: descricao.trim(),
       valorBrutoCents: brutoCents, valorLiquidoCents: liqCents,
       recorrencia: rec, contaId: contaId || null,
+      data: dataHora ? new Date(dataHora).toISOString() : null,
     };
     if (tipo === "gasto") base.fixo = fixo;
     if (rec === "pontual") base.mes = mesInicio;
@@ -4048,6 +4062,16 @@ function ModalPainelItem({ initial, tipo, mesAtual, onClose, onSave, contas }) {
                   )}
                 </div>
               )}
+
+              <div style={{ marginTop: 16 }}>
+                <label style={{display:"block", fontSize:12, color:"#6B5F57", marginBottom:4}}>Data e hora</label>
+                <input
+                  type="datetime-local"
+                  style={{width:"100%", background:"#FAF9F7", border:"1px solid #E8DDD0", borderRadius:12, padding:"12px 16px", fontSize:14, outline:"none"}}
+                  value={dataHora}
+                  onChange={(e) => setDataHora(e.target.value)}
+                />
+              </div>
             </>
           )}
         </div>

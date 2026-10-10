@@ -811,23 +811,33 @@ async function sincronizarPluggyAutomatico(userId, stateAtual) {
       historico: [],
     }));
 
-    const idsContasAtuais = new Set((stateAtual.contas || []).map((c) => c.id));
-    const contasFinal = [
-      ...(stateAtual.contas || []),
-      ...novasContas.filter((c) => !idsContasAtuais.has(c.id)),
-    ];
+    // Mescla "substituindo o que já existe pelo dado novo da Pluggy".
+    // Regra: se o id já está no state, usa o novo (dado fresco do banco).
+    // Se não está, adiciona. Isso garante que saldo e transações atualizadas
+    // sempre prevaleçam sobre versões antigas salvas no Supabase.
+    const mesclarPluggy = (listaAntiga, listaNova) => {
+      const mapaNovos = new Map(listaNova.map((x) => [x.id, x]));
+      const mapaAntigos = new Map((listaAntiga || []).map((x) => [x.id, x]));
+      // Começa pelos antigos, mas para cada id que está nos novos, usa o novo.
+      const resultado = [];
+      for (const antigo of (listaAntiga || [])) {
+        if (mapaNovos.has(antigo.id)) {
+          resultado.push(mapaNovos.get(antigo.id));
+          mapaNovos.delete(antigo.id);
+        } else {
+          resultado.push(antigo);
+        }
+      }
+      // Sobrou do mapaNovos = itens que não existiam antes. Adiciona.
+      for (const novo of mapaNovos.values()) {
+        resultado.push(novo);
+      }
+      return resultado;
+    };
 
-    const idsItensAtuais = new Set((stateAtual.items || []).map((i) => i.id));
-    const itensFinal = [
-      ...(stateAtual.items || []),
-      ...novosItens.filter((i) => !idsItensAtuais.has(i.id)),
-    ];
-
-    const idsInvAtuais = new Set((stateAtual.investimentos || []).map((i) => i.id));
-    const investimentosFinal = [
-      ...(stateAtual.investimentos || []),
-      ...novosInvestimentos.filter((i) => !idsInvAtuais.has(i.id)),
-    ];
+    const contasFinal = mesclarPluggy(stateAtual.contas || [], novasContas);
+    const itensFinal = mesclarPluggy(stateAtual.items || [], novosItens);
+    const investimentosFinal = mesclarPluggy(stateAtual.investimentos || [], novosInvestimentos);
 
     return {
       ok: true,

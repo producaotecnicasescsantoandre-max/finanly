@@ -166,7 +166,7 @@ const I = {
    ───────────────────────────────────────────────────────────── */
 const brl = (cents) => {
   const v = (cents || 0) / 100;
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 };
 const brlFull = (cents) => {
   const v = (cents || 0) / 100;
@@ -2860,7 +2860,7 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
           config={reservaConfig || { tipo: "meses", valor: 6 }}
           onEditMeta={() => setReservaModal(true)}
         />
-        <CardPainelResumo rendas={rendas} gastos={gastos} />
+        <CardPainelResumo rendas={rendas} gastos={gastos} contas={contas} investimentos={investimentos} />
       </div>
 
       {modal && (
@@ -3266,10 +3266,22 @@ function CardPainelReserva({ investimentos, gastosMes, config, onEditMeta }) {
   );
 }
 
-function CardPainelResumo({ rendas, gastos }) {
+function CardPainelResumo({ rendas, gastos, contas, investimentos }) {
   const totalRenda = rendas.reduce((s,i) => s + i.valorLiquidoCents, 0);
   const totalGasto = gastos.reduce((s,i) => s + i.valorLiquidoCents, 0);
   const sobra = totalRenda - totalGasto;
+
+  // Saldo por conta (usa a mesma regra do card Contas)
+  const saldosPorConta = (contas || []).map((c) => {
+    const saldo = calcularSaldoConta(c, [], investimentos || []);
+    const entrou = rendas.filter((r) => r.contaId === c.id).reduce((s,i) => s + (i.valorLiquidoCents || 0), 0);
+    const saiu = gastos.filter((g) => g.contaId === c.id).reduce((s,i) => s + (i.valorLiquidoCents || 0), 0);
+    const variacao = entrou - saiu;
+    return { id: c.id, nome: c.descricao, saldo, variacao };
+  });
+
+  const totalSaldo = saldosPorConta.reduce((s, c) => s + c.saldo, 0);
+  const totalVariacao = saldosPorConta.reduce((s, c) => s + c.variacao, 0);
 
   return (
     <div className="bg-white rounded-2xl border border-[#E8DDD0] p-5 flex flex-col">
@@ -3287,6 +3299,32 @@ function CardPainelResumo({ rendas, gastos }) {
           <span className="text-[13px] font-medium" style={{color:"#fff"}}>Sobra do mês</span>
           <span className="text-[16px] font-semibold" style={{color: sobra >= 0 ? "#7EC98A" : "#FF8A70"}}>{brl(sobra)}</span>
         </div>
+
+        {saldosPorConta.length > 0 && (
+          <div style={{borderTop:"1px solid #EDE7DF", paddingTop:12, marginTop:4}}>
+            <p className="text-[11px] font-semibold text-[#6b6b6b] uppercase mb-2" style={{letterSpacing:"0.1em"}}>Saldo por banco</p>
+            {saldosPorConta.map((c) => (
+              <div key={c.id} style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:"1px solid #F2EDE8"}}>
+                <span className="text-[12px] text-[#3d3d3d]" style={{overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"55%"}}>{c.nome}</span>
+                <div style={{display:"flex", alignItems:"center", gap:8}}>
+                  <span className="text-[12px]" style={{color: c.variacao >= 0 ? "#2f6b36" : "#b8442f"}}>
+                    {c.variacao >= 0 ? "+" : "−"}{brl(Math.abs(c.variacao))}
+                  </span>
+                  <span className="text-[13px] font-semibold text-[#0a0a0a]">{brl(c.saldo)}</span>
+                </div>
+              </div>
+            ))}
+            <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", paddingTop:8, marginTop:4}}>
+              <span className="text-[12px] font-semibold text-[#0a0a0a]">Total</span>
+              <div style={{display:"flex", alignItems:"center", gap:8}}>
+                <span className="text-[12px] font-semibold" style={{color: totalVariacao >= 0 ? "#2f6b36" : "#b8442f"}}>
+                  {totalVariacao >= 0 ? "+" : "−"}{brl(Math.abs(totalVariacao))}
+                </span>
+                <span className="text-[14px] font-semibold text-[#0a0a0a]">{brl(totalSaldo)}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

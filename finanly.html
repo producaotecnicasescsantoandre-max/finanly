@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+f<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
@@ -2712,7 +2712,7 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
           <p className="text-[11px] text-[#8A7F76]">Puxe saldos e transações automaticamente</p>
         </div>
         <button
-          onClick={async () => {
+onClick={async () => {
             await abrirWidgetPluggy(async (item) => {
               console.log("PLUGGY_ITEM_COMPLETO:", JSON.stringify(item, null, 2));
               const itemIdReal = item?.item?.id || item?.itemId || item?.id;
@@ -2721,35 +2721,62 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
                 return;
               }
 
-              // Salva a conexão na tabela pluggy_connections para sincronizações futuras
               try {
                 const { data: userData } = await supabase.auth.getUser();
-                if (userData?.user?.id) {
-                  await supabase.from("pluggy_connections").upsert({
-                    user_id: userData.user.id,
-                    item_id: itemIdReal,
-                    last_sync_at: null,
-                    created_at_atual: false,
-                  }, { onConflict: "user_id,item_id" });
+                const userId = userData?.user?.id;
+                if (!userId) {
+                  alert("Sessão expirada. Faça login novamente.");
+                  return;
                 }
-              } catch (e) {
-                console.error("Erro ao salvar conexão Pluggy:", e);
-              }
 
-              try {
+                // Verifica se essa conexão já existe
+                const { data: conexaoExistente } = await supabase
+                  .from("pluggy_connections")
+                  .select("*")
+                  .eq("user_id", userId)
+                  .eq("item_id", itemIdReal)
+                  .maybeSingle();
+
+                const primeiraConexao = !conexaoExistente;
+                const jaSincronizou = conexaoExistente?.created_at_atual === true;
+
+                // Calcula o "from"
+                let from;
+                if (primeiraConexao || !jaSincronizou) {
+                  // Primeira conexão: só dados atuais, sem transações antigas.
+                  const d = new Date();
+                  d.setDate(d.getDate() - 1);
+                  from = d.toISOString().slice(0, 10);
+                } else {
+                  // Sincronizações seguintes: desde a data da conexão (-1 dia de margem).
+                  const d = new Date(conexaoExistente.created_at || new Date());
+                  d.setDate(d.getDate() - 1);
+                  from = d.toISOString().slice(0, 10);
+                }
+
+                // Salva (ou atualiza) a conexão ANTES de buscar dados.
+                await supabase.from("pluggy_connections").upsert({
+                  user_id: userId,
+                  item_id: itemIdReal,
+                  last_sync_at: new Date().toISOString(),
+                  created_at_atual: true,
+                }, { onConflict: "user_id,item_id" });
+
+                // Chama a Edge Function com o "from" correto.
                 const resp = await fetch(`${SUPABASE_URL}/functions/v1/pluggy-dados`, {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${SUPABASE_KEY}`,
                   },
-                  body: JSON.stringify({ itemId: itemIdReal }),
+                  body: JSON.stringify({ itemId: itemIdReal, from }),
                 });
                 const dados = await resp.json();
                 if (!resp.ok || !dados.ok) {
                   alert("Banco conectado, mas houve erro ao puxar dados: " + (dados.error || resp.status));
                   return;
                 }
+
                 const novasContas = (dados.contas || []).map((c) => ({
                   id: `pluggy-${c.id}`,
                   descricao: c.name || "Conta Pluggy",
@@ -2757,7 +2784,8 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
                   isReserva: false,
                 }));
 
-                const transacoes = dados.transacoes || [];
+                // Só importa transações se NÃO for a primeira conexão.
+                const transacoes = primeiraConexao ? [] : (dados.transacoes || []);
                 const novosItens = transacoes.map((t) => {
                   const ehEntrada = (t.amount || 0) > 0;
                   const valorCents = Math.abs(Math.round((t.amount || 0) * 100));
@@ -2772,6 +2800,7 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
                     valorLiquidoCents: valorCents,
                     recorrencia: "pontual",
                     mes: `${ano}-${mes}`,
+                    data: t.date || null,
                     contaId: `pluggy-${t.accountId}`,
                     fixo: false,
                   };
@@ -2815,12 +2844,17 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
                   };
                 });
 
-                alert(`Banco conectado! ${novasContas.length} conta(s), ${novosItens.length} transação(ões) e ${novosInvestimentos.length} investimento(s) adicionados.`);
+                alert(
+                  primeiraConexao
+                    ? `Banco conectado! ${novasContas.length} conta(s), ${novosInvestimentos.length} investimento(s). Transações serão puxadas a partir de agora.`
+                    : `Sincronizado! ${novosItens.length} transação(ões) nova(s).`
+                );
               } catch (e) {
                 alert("Erro ao buscar dados do banco: " + e.message);
               }
             });
           }}
+
           className="text-[12px] bg-[#111] text-white px-4 py-2 rounded-full hover:bg-black transition"
         >
           Conectar

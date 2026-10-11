@@ -2044,6 +2044,7 @@ function ConsultantChat({ state, setState, apiKey, onNeedApiKey }) {
 
 /* ── Dashboard ─────────────────────────────────────────────── */
 function Dashboard({ state, setState, onReset, apiKey, onNeedApiKey, user }) {
+  useEffect(() => { window.__claroStateAtual = state; }, [state]);
   const [tab, setTab] = useState("overview");
   const [scenario, setScenario] = useState("equilibrado");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -2706,159 +2707,130 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
           <p className="text-[18px] font-medium">{KEY_MESES[mes]} {ano}</p>
           <p className="text-[11px] text-[#8A7F76]">{ehMesAtual ? "mês atual" : "outro mês"}</p>
         </div>
-      <div className="bg-white border border-[#E8DDD0] rounded-2xl px-4 py-3 mb-4 flex items-center justify-between">
-        <div>
-          <p className="text-[13px] font-medium text-[#0a0a0a]">Conectar banco</p>
-          <p className="text-[11px] text-[#8A7F76]">Puxe saldos e transações automaticamente</p>
+      <div className="bg-white border border-[#E8DDD0] rounded-2xl px-4 py-3 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-[13px] font-medium text-[#0a0a0a]">Conectar banco</p>
+            <p className="text-[11px] text-[#8A7F76]">Puxa saldos e investimentos (sem transações)</p>
+          </div>
+          <button
+            onClick={async () => {
+              await abrirWidgetPluggy(async (item) => {
+                console.log("PLUGGY_ITEM_COMPLETO:", JSON.stringify(item, null, 2));
+                const itemIdReal = item?.item?.id || item?.itemId || item?.id;
+                if (!itemIdReal) {
+                  alert("Não foi possível identificar o item da conexão.");
+                  return;
+                }
+
+                try {
+                  const { data: userData } = await supabase.auth.getUser();
+                  if (userData?.user?.id) {
+                    await supabase.from("pluggy_connections").upsert({
+                      user_id: userData.user.id,
+                      item_id: itemIdReal,
+                      last_sync_at: new Date().toISOString(),
+                      created_at_atual: true,
+                    }, { onConflict: "user_id,item_id" });
+                  }
+                } catch (e) {
+                  console.error("Erro ao salvar conexão Pluggy:", e);
+                }
+
+                try {
+                  const resp = await fetch(`${SUPABASE_URL}/functions/v1/pluggy-dados`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "Authorization": `Bearer ${SUPABASE_KEY}`,
+                    },
+                    body: JSON.stringify({ itemId: itemIdReal }),
+                  });
+                  const dados = await resp.json();
+                  if (!resp.ok || !dados.ok) {
+                    alert("Banco conectado, mas houve erro ao puxar dados: " + (dados.error || resp.status));
+                    return;
+                  }
+                  const novasContas = (dados.contas || []).map((c) => ({
+                    id: `pluggy-${c.id}`,
+                    descricao: c.name || "Conta Pluggy",
+                    saldoCents: Math.round((c.balance || 0) * 100),
+                    isReserva: false,
+                  }));
+
+                  const novosInvestimentos = (dados.investimentos || []).map((i) => ({
+                    id: `pluggy-inv-${i.id}`,
+                    descricao: i.name || "Investimento Pluggy",
+                    banco: i.institutionName || "",
+                    contaVinculadaId: `pluggy-${i.accountId}`,
+                    saiuDaConta: false,
+                    valorAplicadoCents: Math.round((i.amountOriginal || i.amount || 0) * 100),
+                    valorAtualCents: Math.round((i.balance || 0) * 100),
+                    taxa: 0,
+                    tipoTaxa: "anual",
+                    liquidez: "D0",
+                    dataInicio: i.date ? i.date.slice(0, 7) : null,
+                    dataFim: null,
+                    aporteMensalCents: 0,
+                    historico: [],
+                  }));
+
+                  setState((s) => {
+                    const contasAtuais = s.contas || [];
+                    const idsContas = new Set(contasAtuais.map((x) => x.id));
+                    const contasNovas = novasContas.filter((c) => !idsContas.has(c.id));
+
+                    const invAtuais = s.investimentos || [];
+                    const idsInv = new Set(invAtuais.map((x) => x.id));
+                    const invNovos = novosInvestimentos.filter((i) => !idsInv.has(i.id));
+
+                    return {
+                      ...s,
+                      contas: [...contasAtuais, ...contasNovas],
+                      investimentos: [...invAtuais, ...invNovos],
+                    };
+                  });
+
+                  alert(`Banco conectado! ${novasContas.length} conta(s) e ${novosInvestimentos.length} investimento(s). Sem transações — entram via lançamento manual.`);
+                } catch (e) {
+                  alert("Erro ao buscar dados do banco: " + e.message);
+                }
+              });
+            }}
+            className="text-[12px] bg-[#111] text-white px-4 py-2 rounded-full hover:bg-black transition"
+          >
+            Conectar
+          </button>
         </div>
-        <button
-onClick={async () => {
-            await abrirWidgetPluggy(async (item) => {
-              console.log("PLUGGY_ITEM_COMPLETO:", JSON.stringify(item, null, 2));
-              const itemIdReal = item?.item?.id || item?.itemId || item?.id;
-              if (!itemIdReal) {
-                alert("Não foi possível identificar o item da conexão.");
-                return;
-              }
 
-              try {
-                const { data: userData } = await supabase.auth.getUser();
-                const userId = userData?.user?.id;
-                if (!userId) {
-                  alert("Sessão expirada. Faça login novamente.");
-                  return;
-                }
-
-                // Verifica se essa conexão já existe
-                const { data: conexaoExistente } = await supabase
-                  .from("pluggy_connections")
-                  .select("*")
-                  .eq("user_id", userId)
-                  .eq("item_id", itemIdReal)
-                  .maybeSingle();
-
-                const primeiraConexao = !conexaoExistente;
-                const jaSincronizou = conexaoExistente?.created_at_atual === true;
-
-                // Calcula o "from"
-                let from;
-                if (primeiraConexao || !jaSincronizou) {
-                  // Primeira conexão: só dados atuais, sem transações antigas.
-                  const d = new Date();
-                  d.setDate(d.getDate() - 1);
-                  from = d.toISOString().slice(0, 10);
-                } else {
-                  // Sincronizações seguintes: desde a data da conexão (-1 dia de margem).
-                  const d = new Date(conexaoExistente.created_at || new Date());
-                  d.setDate(d.getDate() - 1);
-                  from = d.toISOString().slice(0, 10);
-                }
-
-                // Salva (ou atualiza) a conexão ANTES de buscar dados.
-                await supabase.from("pluggy_connections").upsert({
-                  user_id: userId,
-                  item_id: itemIdReal,
-                  last_sync_at: new Date().toISOString(),
-                  created_at_atual: true,
-                }, { onConflict: "user_id,item_id" });
-
-                // Chama a Edge Function com o "from" correto.
-                const resp = await fetch(`${SUPABASE_URL}/functions/v1/pluggy-dados`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${SUPABASE_KEY}`,
-                  },
-                  body: JSON.stringify({ itemId: itemIdReal, from }),
-                });
-                const dados = await resp.json();
-                if (!resp.ok || !dados.ok) {
-                  alert("Banco conectado, mas houve erro ao puxar dados: " + (dados.error || resp.status));
-                  return;
-                }
-
-                const novasContas = (dados.contas || []).map((c) => ({
-                  id: `pluggy-${c.id}`,
-                  descricao: c.name || "Conta Pluggy",
-                  saldoCents: Math.round((c.balance || 0) * 100),
-                  isReserva: false,
-                }));
-
-                // Só importa transações se NÃO for a primeira conexão.
-                const transacoes = primeiraConexao ? [] : (dados.transacoes || []);
-                const novosItens = transacoes.map((t) => {
-                  const ehEntrada = (t.amount || 0) > 0;
-                  const valorCents = Math.abs(Math.round((t.amount || 0) * 100));
-                  const data = new Date(t.date);
-                  const ano = data.getFullYear();
-                  const mes = String(data.getMonth() + 1).padStart(2, "0");
-                  return {
-                    id: `pluggy-tx-${t.id}`,
-                    tipo: ehEntrada ? "renda" : "gasto",
-                    descricao: t.description || t.descriptionRaw || "Transação Pluggy",
-                    valorBrutoCents: valorCents,
-                    valorLiquidoCents: valorCents,
-                    recorrencia: "pontual",
-                    mes: `${ano}-${mes}`,
-                    data: t.date || null,
-                    contaId: `pluggy-${t.accountId}`,
-                    fixo: false,
-                  };
-                });
-
-                const novosInvestimentos = (dados.investimentos || []).map((i) => ({
-                  id: `pluggy-inv-${i.id}`,
-                  descricao: i.name || "Investimento Pluggy",
-                  banco: i.institutionName || "",
-                  contaVinculadaId: `pluggy-${i.accountId}`,
-                  saiuDaConta: false,
-                  valorAplicadoCents: Math.round((i.amountOriginal || i.amount || 0) * 100),
-                  valorAtualCents: Math.round((i.balance || 0) * 100),
-                  taxa: 0,
-                  tipoTaxa: "anual",
-                  liquidez: "D0",
-                  dataInicio: i.date ? i.date.slice(0, 7) : null,
-                  dataFim: null,
-                  aporteMensalCents: 0,
-                  historico: [],
-                }));
-
-                setState((s) => {
-                  const contasAtuais = s.contas || [];
-                  const idsContas = new Set(contasAtuais.map((x) => x.id));
-                  const contasNovas = novasContas.filter((c) => !idsContas.has(c.id));
-
-                  const itensAtuais = s.items || [];
-                  const idsItens = new Set(itensAtuais.map((x) => x.id));
-                  const itensNovos = novosItens.filter((i) => !idsItens.has(i.id));
-
-                  const invAtuais = s.investimentos || [];
-                  const idsInv = new Set(invAtuais.map((x) => x.id));
-                  const invNovos = novosInvestimentos.filter((i) => !idsInv.has(i.id));
-
-                  return {
-                    ...s,
-                    contas: [...contasAtuais, ...contasNovas],
-                    items: [...itensAtuais, ...itensNovos],
-                    investimentos: [...invAtuais, ...invNovos],
-                  };
-                });
-
-                alert(
-                  primeiraConexao
-                    ? `Banco conectado! ${novasContas.length} conta(s), ${novosInvestimentos.length} investimento(s). Transações serão puxadas a partir de agora.`
-                    : `Sincronizado! ${novosItens.length} transação(ões) nova(s).`
-                );
-              } catch (e) {
-                alert("Erro ao buscar dados do banco: " + e.message);
-              }
-            });
-          }}
-
-          className="text-[12px] bg-[#111] text-white px-4 py-2 rounded-full hover:bg-black transition"
-        >
-          Conectar
-        </button>
+        <div className="flex gap-2 pt-3 border-t border-[#F2EDE8]">
+          <button
+            onClick={async () => {
+              const { data: userData } = await supabase.auth.getUser();
+              if (!userData?.user?.id) { alert("Sessão expirada."); return; }
+              if (!confirm("Isso vai substituir o que está na tela pelo que está salvo na nuvem. Continuar?")) return;
+              const salvo = await loadFromSupabase(userData.user.id);
+              if (!salvo) { alert("Não consegui carregar da nuvem."); return; }
+              setState(salvo);
+              alert("Dados puxados da nuvem.");
+            }}
+            className="flex-1 text-[12px] bg-white border border-[#E8DDD0] text-[#0a0a0a] px-3 py-2 rounded-full hover:border-[#111] transition"
+          >
+            ↓ Puxar da nuvem
+          </button>
+          <button
+            onClick={async () => {
+              const { data: userData } = await supabase.auth.getUser();
+              if (!userData?.user?.id) { alert("Sessão expirada."); return; }
+              const res = await saveToSupabase(userData.user.id, window.__claroStateAtual || {});
+              if (res.ok) alert("Enviado para a nuvem.");
+              else alert("Erro ao enviar: " + res.error);
+            }}
+            className="flex-1 text-[12px] bg-white border border-[#E8DDD0] text-[#0a0a0a] px-3 py-2 rounded-full hover:border-[#111] transition"
+          >
+            ↑ Enviar para a nuvem
+          </button>
+        </div>
       </div>
         <button onClick={() => navegar(1)} className="w-8 h-8 rounded-full bg-white border border-[#E8DDD0] flex items-center justify-center text-[16px]">→</button>
       </div>
@@ -4266,22 +4238,7 @@ function App() {
         setState(estadoInicial);
         setScreen("dashboard");
 
-        // Sincronização automática com a Pluggy em segundo plano
-        (async () => {
-          try {
-            const resultado = await sincronizarPluggyAutomatico(currentUser.id, estadoInicial);
-            if (resultado.ok) {
-              setState((s) => ({
-                ...s,
-                contas: resultado.contas,
-                items: resultado.items,
-                investimentos: resultado.investimentos,
-              }));
-            }
-          } catch (e) {
-            console.error("Falha na sincronização automática:", e);
-          }
-        })();
+
       } else {
         setScreen("login");
       }

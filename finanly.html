@@ -1,4 +1,4 @@
-f<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
@@ -863,6 +863,116 @@ async function sincronizarPluggyAutomatico(userId, stateAtual) {
     };
   } catch (e) {
     console.error("Erro na sincronização automática:", e);
+    return { ok: false, motivo: String(e) };
+  }
+}
+
+async function sincronizarPluggyManual(userId, stateAtual) {
+  if (!userId) return { ok: false, motivo: "sem usuário" };
+  try {
+    const { data: conexoes, error } = await supabase
+      .from("pluggy_connections")
+      .select("*")
+      .eq("user_id", userId);
+
+    if (error || !conexoes || conexoes.length === 0) {
+      return { ok: false, motivo: "sem conexao" };
+    }
+
+    let contasAcumuladas = [];
+    let transacoesAcumuladas = [];
+    let investimentosAcumulados = [];
+
+    for (const conexao of conexoes) {
+      let from;
+      const d = new Date(conexao.created_at || new Date());
+      d.setDate(d.getDate() - 1);
+      from = d.toISOString().slice(0, 10);
+
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/pluggy-dados`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: conexao.item_id, from }),
+      });
+
+      if (!resp.ok) continue;
+
+      const dados = await resp.json();
+      if (!dados.ok) continue;
+
+      contasAcumuladas.push(...(dados.contas || []));
+      transacoesAcumuladas.push(...(dados.transacoes || []));
+      investimentosAcumulados.push(...(dados.investimentos || []));
+    }
+
+    const novasContas = contasAcumuladas.map((c) => ({
+      id: `pluggy-${c.id}`,
+      descricao: c.name || "Conta Pluggy",
+      saldoCents: Math.round((c.balance || 0) * 100),
+      isReserva: false,
+    }));
+
+    const novosItens = transacoesAcumuladas.map((t) => {
+      const ehEntrada = (t.amount || 0) > 0;
+      const valorCents = Math.abs(Math.round((t.amount || 0) * 100));
+      const data = new Date(t.date);
+      const ano = data.getFullYear();
+      const mes = String(data.getMonth() + 1).padStart(2, "0");
+      return {
+        id: `pluggy-tx-${t.id}`,
+        tipo: ehEntrada ? "renda" : "gasto",
+        descricao: t.description || t.descriptionRaw || "Transação Pluggy",
+        valorBrutoCents: valorCents,
+        valorLiquidoCents: valorCents,
+        recorrencia: "pontual",
+        mes: `${ano}-${mes}`,
+        data: t.date || null,
+        contaId: `pluggy-${t.accountId}`,
+        fixo: false,
+      };
+    });
+
+    const novosInvestimentos = investimentosAcumulados.map((i) => ({
+      id: `pluggy-inv-${i.id}`,
+      descricao: i.name || "Investimento Pluggy",
+      banco: i.institutionName || "",
+      contaVinculadaId: `pluggy-${i.accountId}`,
+      saiuDaConta: false,
+      valorAplicadoCents: Math.round((i.amountOriginal || i.amount || 0) * 100),
+      valorAtualCents: Math.round((i.balance || 0) * 100),
+      taxa: 0,
+      tipoTaxa: "anual",
+      liquidez: "D0",
+      dataInicio: i.date ? i.date.slice(0, 7) : null,
+      dataFim: null,
+      aporteMensalCents: 0,
+      historico: [],
+    }));
+
+    const mesclar = (listaAntiga, listaNova) => {
+      const mapaNovos = new Map(listaNova.map((x) => [x.id, x]));
+      const resultado = [];
+      for (const antigo of (listaAntiga || [])) {
+        if (mapaNovos.has(antigo.id)) {
+          resultado.push(mapaNovos.get(antigo.id));
+          mapaNovos.delete(antigo.id);
+        } else {
+          resultado.push(antigo);
+        }
+      }
+      for (const novo of mapaNovos.values()) resultado.push(novo);
+      return resultado;
+    };
+
+    return {
+      ok: true,
+      contas: mesclar(stateAtual.contas || [], novasContas),
+      items: mesclar(stateAtual.items || [], novosItens),
+      investimentos: mesclar(stateAtual.investimentos || [], novosInvestimentos),
+      novasTransacoes: novosItens.length,
+    };
+  } catch (e) {
+    console.error("Erro na sincronização manual:", e);
     return { ok: false, motivo: String(e) };
   }
 }
@@ -2808,12 +2918,29 @@ function PainelVisaoGeral({ items, contas, investimentos, reservaConfig, setStat
             onClick={async () => {
               const { data: userData } = await supabase.auth.getUser();
               if (!userData?.user?.id) { alert("Sessão expirada."); return; }
-              if (!confirm("Isso vai substituir o que está na tela pelo que está salvo na nuvem. Continuar?")) return;
-              const salvo = await loadFromSupabase(userData.user.id);
-              if (!salvo) { alert("Não consegui carregar da nuvem."); return; }
-              setState(salvo);
-              alert("Dados puxados da nuvem.");
+              if (!confirm("Isso vai atualizar o saldo e puxar as transações desde a data da conexão. Continuar?")) return;
+
+              const estadoAtual = window.__claroStateAtual || {};
+
+              const resultado = await sincronizarPluggyManual(userData.user.id, estadoAtual);
+
+              if (!resultado.ok) {
+                alert("Não consegui sincronizar com a Pluggy: " + (resultado.motivo || "erro"));
+                return;
+              }
+
+              const novoEstado = {
+                ...estadoAtual,
+                contas: resultado.contas,
+                items: resultado.items,
+                investimentos: resultado.investimentos,
+              };
+
+              setState(novoEstado);
+              await saveToSupabase(userData.user.id, novoEstado);
+              alert("Sincronizado! " + resultado.novasTransacoes + " transação(ões) processada(s).");
             }}
+
             className="flex-1 text-[12px] bg-white border border-[#E8DDD0] text-[#0a0a0a] px-3 py-2 rounded-full hover:border-[#111] transition"
           >
             ↓ Puxar da nuvem
